@@ -1,0 +1,13 @@
+{
+  "name": "Exam_2_sw",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:server": "npm --workspace @exam2/server run dev",
+    "dev:web": "npm --workspace @exam2/web run dev",
+    "build": "npm --workspace @exam2/server run build && npm --workspace @exam2/web run build"
+  }
+}

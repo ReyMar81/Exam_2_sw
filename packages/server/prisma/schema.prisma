@@ -1,0 +1,124 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  OWNER
+  EDITOR
+  VIEWER
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  createdAt DateTime @default(now())
+
+  ownedProjects   Project[]
+  projectAccess   ProjectUser[]
+  createdDiagrams Diagram[]
+  sessions        Session[]
+  locks           Lock[]
+  diagramChanges  DiagramChange[]
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  isPublic    Boolean  @default(false)
+  owner       User     @relation(fields: [ownerId], references: [id])
+  ownerId     String
+  users       ProjectUser[]
+  diagrams    Diagram[]
+  invitations Invitation[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model ProjectUser {
+  id        String  @id @default(cuid())
+  role      Role    @default(VIEWER)
+  user      User    @relation(fields: [userId], references: [id])
+  userId    String
+  project   Project @relation(fields: [projectId], references: [id])
+  projectId String
+
+  @@unique([userId, projectId])
+}
+
+model Diagram {
+  id        String   @id @default(cuid())
+  project   Project  @relation(fields: [projectId], references: [id])
+  projectId String
+  author    User     @relation(fields: [authorId], references: [id])
+  authorId  String
+
+  name      String
+  data      Json
+  version   Int        @default(1)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  sessions       Session[]
+  locks          Lock[]
+  diagramChanges DiagramChange[]
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String
+  diagram    Diagram  @relation(fields: [diagramId], references: [id])
+  diagramId  String
+  startedAt  DateTime @default(now())
+  endedAt    DateTime?
+  lastPing   DateTime @default(now())
+
+  @@index([diagramId, userId])
+}
+
+model Lock {
+  id         String   @id @default(cuid())
+  diagram    Diagram  @relation(fields: [diagramId], references: [id])
+  diagramId  String
+  resourceId String   // ej: node:Producto, edge:Pedido-Detalle
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String
+  acquiredAt DateTime @default(now())
+  expiresAt  DateTime
+
+  @@unique([diagramId, resourceId])
+}
+
+model DiagramChange {
+  id         String   @id @default(cuid())
+  diagram    Diagram  @relation(fields: [diagramId], references: [id])
+  diagramId  String
+  user       User     @relation(fields: [userId], references: [id])
+  userId     String
+  action     String   // ej: ADD_NODE, UPDATE_NODE, DELETE_EDGE
+  payload    Json
+  createdAt  DateTime @default(now())
+
+  @@index([diagramId, createdAt])
+}
+
+model Invitation {
+  id         String    @id @default(cuid())
+  project    Project   @relation(fields: [projectId], references: [id])
+  projectId  String
+  email      String?
+  role       Role      @default(VIEWER)
+  token      String    @unique
+  createdAt  DateTime  @default(now())
+  acceptedAt DateTime?
+}
