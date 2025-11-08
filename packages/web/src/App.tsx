@@ -1,11 +1,10 @@
 import React, { useEffect } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import Landing from "./pages/Landing";
 import Dashboard from "./pages/Dashboard";
 import { useAppStore } from "./store/useAppStore";
 
 export default function App() {
-  const { user, setUser } = useAppStore();
+  const { user } = useAppStore();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -15,16 +14,23 @@ export default function App() {
   }, [user, location]);
 
   useEffect(() => {
+    // Si no hay usuario autenticado, redirigir a login
+    if (!user && location.pathname !== "/login" && !location.pathname.startsWith("/invite/")) {
+      console.log("🔄 [App] No user, redirecting to login");
+      navigate("/login");
+      return;
+    }
+    
     // Si el usuario está autenticado y está en /, redirigir a dashboard
     if (user && location.pathname === "/") {
       console.log("🔄 [App] User authenticated, redirecting to dashboard");
       navigate("/dashboard");
     }
-  }, [user, location]);
+  }, [user, location, navigate]);
 
   if (!user) {
-    console.log("🔄 [App] Rendering Landing (no user)");
-    return <Landing onLogin={setUser} />;
+    console.log("⏳ [App] Waiting for authentication...");
+    return null; // Evitar render mientras redirige
   }
 
   console.log("✅ [App] Rendering Dashboard");

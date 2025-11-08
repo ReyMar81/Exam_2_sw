@@ -18,7 +18,6 @@ import { getSocket, disconnectSocket } from "../socketManager";
 import { useAppStore } from "../store/useAppStore";
 import { api } from "../api";
 import TableNode from "../components/TableNode";
-import ClassNode from "../components/ClassNode"; // Mantener por compatibilidad
 import { Sidebar } from "../components/Sidebar";
 import PropertiesPanel from "../components/PropertiesPanel";
 import { generateSQL, downloadSQL } from "../utils/sqlGenerator";
@@ -63,13 +62,11 @@ export default function DiagramEditor() {
 
   // Tipos de nodos personalizados
   const nodeTypes = { 
-    table: TableNode,
-    class: ClassNode // Mantener por compatibilidad con diagramas viejos
+    table: TableNode
   };
 
   // Obtener lista de nombres de tablas para el dropdown de FK
   const availableTables = nodes
-    .filter(n => n.type === 'table' || n.type === 'class')
     .map(n => n.data.name || n.data.label || "Sin nombre");
 
   // Load project if not in store (e.g., direct URL access or F5 refresh)
@@ -135,9 +132,85 @@ export default function DiagramEditor() {
         .then((d) => {
           console.log("📊 [Editor] Diagram loaded:", d);
           if (d?.data) {
-            setNodes(d.data.nodes || []);
-            setEdges(d.data.edges || []);
-            console.log(`✅ [Editor] Loaded ${d.data.nodes?.length || 0} nodes, ${d.data.edges?.length || 0} edges`);
+            const loadedNodes = d.data.nodes || [];
+            const loadedEdges = d.data.edges || [];
+            
+            setNodes(loadedNodes);
+            setEdges(loadedEdges);
+            
+            console.log(`✅ [Editor] Loaded ${loadedNodes.length} nodes, ${loadedEdges.length} edges`);
+            
+            // 🔧 Reconstruir edges faltantes desde fields con references
+            // Solo si hay nodos pero no hay edges (o hay menos edges de las esperadas)
+            if (loadedNodes.length > 0) {
+              const reconstructedEdges: any[] = [];
+              
+              loadedNodes.forEach((node: any) => {
+                const fields = node.data?.fields || [];
+                
+                fields.forEach((field: any) => {
+                  // Si el field es FK y tiene references + referencesField
+                  if (field.isForeign && field.references && field.referencesField) {
+                    // Buscar si ya existe un edge para esta relación específica
+                    const existingEdge = loadedEdges.find((e: any) => 
+                      e.data?.sourceField === field.referencesField && 
+                      e.data?.targetField === field.name &&
+                      e.target === node.id
+                    );
+                    
+                    if (!existingEdge) {
+                      // Encontrar el nodo referenciado
+                      const targetNode = loadedNodes.find((n: any) => 
+                        n.data.name === field.references || n.data.label === field.references
+                      );
+                      
+                      if (targetNode) {
+                        console.log(`🔧 [Editor] Reconstructing edge: ${targetNode.data.name}.${field.referencesField} → ${node.data.name}.${field.name}`);
+                        
+                        // Obtener estilo según tipo de relación
+                        const edgeStyle = getEdgeStyle(field.relationType || "1-N");
+                        
+                        const reconstructedEdge: any = {
+                          id: `edge-reconstructed-${Date.now()}-${Math.random()}`,
+                          source: targetNode.id,  // Tabla con PK
+                          target: node.id,        // Tabla con FK
+                          label: field.relationType || "1-N",
+                          animated: edgeStyle.animated,
+                          style: { 
+                            stroke: edgeStyle.stroke, 
+                            strokeWidth: edgeStyle.strokeWidth,
+                            strokeDasharray: edgeStyle.strokeDasharray
+                          },
+                          type: edgeStyle.type,
+                          labelStyle: { 
+                            fill: edgeStyle.stroke, 
+                            fontWeight: 700, 
+                            fontSize: 13
+                          },
+                          labelBgStyle: edgeStyle.labelBgStyle,
+                          markerEnd: {
+                            type: 'arrowclosed',
+                            color: edgeStyle.stroke
+                          },
+                          data: {
+                            sourceField: field.referencesField,  // Campo PK
+                            targetField: field.name,             // Campo FK
+                            relationType: field.relationType || "1-N"
+                          }
+                        };
+                        
+                        reconstructedEdges.push(reconstructedEdge);
+                      }
+                    }
+                  }
+                });
+              });
+              
+              if (reconstructedEdges.length > 0) {
+                console.log(`✨ [Editor] Reconstructed ${reconstructedEdges.length} missing edges from field references`);
+                setEdges((prev: any[]) => [...prev, ...reconstructedEdges]);
+              }
+            }
           }
         })
         .catch((err) => {
@@ -489,6 +562,12 @@ export default function DiagramEditor() {
         const sourceTableName = sourceNode.data.name || sourceNode.data.label || "tabla1";
         const targetTableName = targetNode.data.name || targetNode.data.label || "tabla2";
         
+        // 🆕 Detectar campos PK de ambas tablas para la relación N-N
+        const sourcePK = sourceNode.data.fields.find((f: any) => f.isPrimary);
+        const targetPK = targetNode.data.fields.find((f: any) => f.isPrimary);
+        const sourcePKName = sourcePK?.name || "id";
+        const targetPKName = targetPK?.name || "id";
+        
         const joinTableId = `join-${Date.now()}`;
         const joinTableNode: Node = {
           id: joinTableId,
@@ -503,25 +582,28 @@ export default function DiagramEditor() {
             fields: [
               { 
                 id: Date.now() + 1, 
-                name: `${sourceTableName}_id`, 
-                type: "INT", 
+                name: `${sourceTableName}_${sourcePKName}`, // 🆕 Incluir nombre del PK
+                type: sourcePK?.type || "INT", 
                 isForeign: true, 
                 nullable: false,
-                references: sourceTableName
+                references: sourceTableName,
+                referencesField: sourcePKName // 🆕 Campo PK específico
               },
               { 
                 id: Date.now() + 2, 
-                name: `${targetTableName}_id`, 
-                type: "INT", 
+                name: `${targetTableName}_${targetPKName}`, // 🆕 Incluir nombre del PK
+                type: targetPK?.type || "INT", 
                 isForeign: true, 
                 nullable: false,
-                references: targetTableName
+                references: targetTableName,
+                referencesField: targetPKName // 🆕 Campo PK específico
               },
             ],
           },
         };
 
         console.log("🔗 [Editor] Creating junction table for N-N:", joinTableId);
+        console.log("🔗 [Editor] FK fields:", `${sourceTableName}_${sourcePKName}`, `${targetTableName}_${targetPKName}`);
         
         // Crear edges desde la tabla intermedia a las tablas originales
         const edgeStyle1 = getEdgeStyle("1-N");
@@ -529,36 +611,48 @@ export default function DiagramEditor() {
 
         const edge1: Edge = {
           id: `edge-${Date.now()}-1`,
-          source: joinTableId,
-          target: connection.source!,
+          source: connection.source!,  // 🔄 Tabla source (tiene PK)
+          target: joinTableId,          // 🔄 Tabla intermedia (tiene FK)
           label: "1-N",
           animated: edgeStyle1.animated,
           style: { 
             stroke: edgeStyle1.stroke, 
             strokeWidth: edgeStyle1.strokeWidth,
-            strokeDasharray: edgeStyle1.strokeDasharray // 🆕 Línea punteada
+            strokeDasharray: edgeStyle1.strokeDasharray
           },
           type: edgeStyle1.type,
           labelStyle: { fill: edgeStyle1.stroke, fontWeight: 700, fontSize: 13 },
           labelBgStyle: edgeStyle1.labelBgStyle,
-          markerEnd: { type: 'arrowclosed', color: edgeStyle1.stroke }
+          markerEnd: { type: 'arrowclosed', color: edgeStyle1.stroke },
+          // 🆕 Agregar campos específicos
+          data: {
+            sourceField: sourcePKName,
+            targetField: `${sourceTableName}_${sourcePKName}`,
+            relationType: "1-N"
+          }
         };
 
         const edge2: Edge = {
           id: `edge-${Date.now()}-2`,
-          source: joinTableId,
-          target: connection.target!,
+          source: connection.target!,  // 🔄 Tabla target (tiene PK)
+          target: joinTableId,          // 🔄 Tabla intermedia (tiene FK)
           label: "1-N",
           animated: edgeStyle2.animated,
           style: { 
             stroke: edgeStyle2.stroke, 
             strokeWidth: edgeStyle2.strokeWidth,
-            strokeDasharray: edgeStyle2.strokeDasharray // 🆕 Línea punteada
+            strokeDasharray: edgeStyle2.strokeDasharray
           },
           type: edgeStyle2.type,
           labelStyle: { fill: edgeStyle2.stroke, fontWeight: 700, fontSize: 13 },
           labelBgStyle: edgeStyle2.labelBgStyle,
-          markerEnd: { type: 'arrowclosed', color: edgeStyle2.stroke }
+          markerEnd: { type: 'arrowclosed', color: edgeStyle2.stroke },
+          // 🆕 Agregar campos específicos
+          data: {
+            sourceField: targetPKName,
+            targetField: `${targetTableName}_${targetPKName}`,
+            relationType: "1-N"
+          }
         };
 
         // ⚡ ACTUALIZACIÓN BATCH: Primero actualizar estado local
@@ -603,8 +697,12 @@ export default function DiagramEditor() {
       // 🔗 Crear campo FK automáticamente en la tabla foránea
       const fkField = createFKField(fkTable, pkTable, detectedRelationType);
       
-      if (fkField) {
+      // 🆕 Detectar campos PK y FK para el edge
+      const pkField = pkTable.data.fields.find((f: any) => f.isPrimary);
+      
+      if (fkField && pkField) {
         console.log("✅ [Editor] Created FK field:", fkField.name, "in", fkTable.data.name, "type:", detectedRelationType);
+        console.log("🔗 [Editor] PK field:", pkField.name, "FK field:", fkField.name);
         
         // Actualizar el nodo con el nuevo campo
         setNodes((nds: Node[]) => 
@@ -655,10 +753,16 @@ export default function DiagramEditor() {
           color: edgeStyle.stroke,
           width: 20,
           height: 20
+        },
+        // 🆕 Agregar campos específicos a la edge
+        data: {
+          sourceField: pkField?.name, // Nombre del campo PK (ej: "id_proveedor")
+          targetField: fkField?.name, // Nombre del campo FK (ej: "proveedor_id_proveedor")
+          relationType: detectedRelationType
         }
       };
 
-      console.log("🔗 [Editor] Adding edge:", newEdge.id, "Type:", normalizedType);
+      console.log("🔗 [Editor] Adding edge:", newEdge.id, "Type:", normalizedType, "Fields:", pkField?.name, "→", fkField?.name);
       setEdges((eds: Edge[]) => addEdge(newEdge, eds));
 
       socket.emit("diagram-change", {

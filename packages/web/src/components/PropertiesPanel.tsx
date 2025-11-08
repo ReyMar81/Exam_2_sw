@@ -3,17 +3,7 @@ import { Node, Edge } from "reactflow";
 import { removeFKRelation, updateFKRelation } from "../utils/relationHandler";
 import { askRelationType } from "../utils/relationPrompt";
 import { getEdgeStyle } from "../utils/relationStyles";
-
-interface Field {
-  id: string | number;
-  name: string;
-  type: string;
-  isPrimary?: boolean;
-  isForeign?: boolean;
-  nullable?: boolean;
-  references?: string | null;
-  relationType?: string; // 🆕 Tipo de relación: "1-1", "1-N", "N-N"
-}
+import type { Field } from "@shared/types";
 
 interface PropertiesPanelProps {
   selectedNode: Node | null;
@@ -46,9 +36,9 @@ const DATA_TYPES = [
   "UUID"
 ];
 
-export default function PropertiesPanel({ 
-  selectedNode, 
-  availableTables, 
+export default function PropertiesPanel({
+  selectedNode,
+  availableTables,
   edges = [],
   nodes = [],
   setEdges,
@@ -106,17 +96,17 @@ export default function PropertiesPanel({
   const updateField = (index: number, key: string, value: any) => {
     const newFields = [...table.fields];
     newFields[index] = { ...newFields[index], [key]: value };
-    
+
     // Si se marca como PK, automáticamente hacer NOT NULL
     if (key === "isPrimary" && value === true) {
       newFields[index].nullable = false;
     }
-    
+
     // Si se desmarca FK, limpiar referencias
     if (key === "isForeign" && value === false) {
       newFields[index].references = null;
     }
-    
+
     updateTable("fields", newFields);
   };
 
@@ -136,12 +126,12 @@ export default function PropertiesPanel({
 
   const removeField = (i: number) => {
     const fieldToRemove = table.fields[i];
-    
+
     // Si el campo es FK, eliminar la relación visual
     if (fieldToRemove.isForeign && setEdges && selectedNode) {
       removeFKRelation(selectedNode.id, fieldToRemove.name, edges, setEdges);
     }
-    
+
     updateTable("fields", table.fields.filter((_: any, idx: number) => idx !== i));
   };
 
@@ -168,13 +158,13 @@ export default function PropertiesPanel({
       }}
     >
       {/* Header */}
-      <div style={{ 
+      <div style={{
         marginBottom: 20,
         paddingBottom: 16,
         borderBottom: "2px solid #667eea"
       }}>
-        <h3 style={{ 
-          margin: "0 0 8px 0", 
+        <h3 style={{
+          margin: "0 0 8px 0",
           fontSize: 16,
           color: "#667eea",
           display: "flex",
@@ -183,10 +173,10 @@ export default function PropertiesPanel({
         }}>
           ⚙️ Propiedades
         </h3>
-        <p style={{ 
-          margin: 0, 
-          fontSize: 11, 
-          opacity: 0.6 
+        <p style={{
+          margin: 0,
+          fontSize: 11,
+          opacity: 0.6
         }}>
           Edita los campos de la tabla seleccionada
         </p>
@@ -194,9 +184,9 @@ export default function PropertiesPanel({
 
       {/* Nombre de la tabla */}
       <div style={{ marginBottom: 20 }}>
-        <label style={{ 
-          display: "block", 
-          fontSize: 11, 
+        <label style={{
+          display: "block",
+          fontSize: 11,
           fontWeight: 600,
           marginBottom: 6,
           opacity: 0.8,
@@ -234,14 +224,14 @@ export default function PropertiesPanel({
 
       {/* Lista de campos */}
       <div style={{ marginBottom: 16 }}>
-        <div style={{ 
-          display: "flex", 
+        <div style={{
+          display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
           marginBottom: 12
         }}>
-          <label style={{ 
-            fontSize: 11, 
+          <label style={{
+            fontSize: 11,
             fontWeight: 600,
             opacity: 0.8,
             letterSpacing: "0.5px"
@@ -269,8 +259,8 @@ export default function PropertiesPanel({
         </div>
 
         {table.fields.length === 0 ? (
-          <div style={{ 
-            textAlign: "center", 
+          <div style={{
+            textAlign: "center",
             padding: "32px 16px",
             background: "#252525",
             borderRadius: 8,
@@ -298,11 +288,11 @@ export default function PropertiesPanel({
             >
               {/* Nombre del campo */}
               <div style={{ marginBottom: 8 }}>
-                <label style={{ 
-                  display: "block", 
-                  fontSize: 10, 
+                <label style={{
+                  display: "block",
+                  fontSize: 10,
                   marginBottom: 4,
-                  opacity: 0.6 
+                  opacity: 0.6
                 }}>
                   Nombre
                 </label>
@@ -325,11 +315,11 @@ export default function PropertiesPanel({
 
               {/* Tipo de dato */}
               <div style={{ marginBottom: 8 }}>
-                <label style={{ 
-                  display: "block", 
-                  fontSize: 10, 
+                <label style={{
+                  display: "block",
+                  fontSize: 10,
                   marginBottom: 4,
-                  opacity: 0.6 
+                  opacity: 0.6
                 }}>
                   Tipo de dato
                 </label>
@@ -355,8 +345,8 @@ export default function PropertiesPanel({
               </div>
 
               {/* Checkboxes */}
-              <div style={{ 
-                display: "flex", 
+              <div style={{
+                display: "flex",
                 gap: 12,
                 marginBottom: 8,
                 paddingTop: 8,
@@ -425,11 +415,11 @@ export default function PropertiesPanel({
               {/* Selector de tabla referenciada (solo si es FK) */}
               {f.isForeign && (
                 <div style={{ marginBottom: 8 }}>
-                  <label style={{ 
-                    display: "block", 
-                    fontSize: 10, 
+                  <label style={{
+                    display: "block",
+                    fontSize: 10,
                     marginBottom: 4,
-                    opacity: 0.6 
+                    opacity: 0.6
                   }}>
                     Tabla referenciada
                   </label>
@@ -438,13 +428,14 @@ export default function PropertiesPanel({
                     onChange={async (e) => {
                       const oldReference = table.fields[i].references;
                       const targetTable = e.target.value || null;
-                      
+
                       if (!targetTable) {
                         // Si deseleccionó, eliminar relación
                         if (setEdges && selectedNode && oldReference) {
                           updateFKRelation(selectedNode.id, oldReference, null, edges, nodes, setEdges);
                         }
                         updateField(i, "references", null);
+                        updateField(i, "referencesField", null);
                         updateField(i, "relationType", undefined);
                         return;
                       }
@@ -457,19 +448,8 @@ export default function PropertiesPanel({
                         return;
                       }
 
-                      // ✅ SEGUNDO: Actualizar el campo con references Y relationType juntos
-                      const newFields = [...table.fields];
-                      newFields[i] = { 
-                        ...newFields[i], 
-                        references: targetTable,
-                        relationType: relationType
-                      };
-                      updateTable("fields", newFields);
-
-                      console.log(`🔗 [PropertiesPanel] Creating ${relationType} relation to ${targetTable}`);
-
-                      // Encontrar el nodo destino
-                      const targetNode = nodes.find(n => 
+                      // Encontrar el nodo destino y su campo PK
+                      const targetNode = nodes.find(n =>
                         n.data.name === targetTable || n.data.label === targetTable
                       );
 
@@ -478,16 +458,32 @@ export default function PropertiesPanel({
                         return;
                       }
 
+                      // 🆕 Detectar el campo PK de la tabla referenciada
+                      const targetPKField = targetNode.data.fields?.find((f: any) => f.isPrimary);
+                      const targetPKName = targetPKField?.name || "id";
+
+                      console.log(`🔗 [PropertiesPanel] Creating ${relationType} relation to ${targetTable}.${targetPKName}`);
+
+                      // ✅ SEGUNDO: Actualizar el campo con references, referencesField Y relationType juntos
+                      const newFields = [...table.fields];
+                      newFields[i] = {
+                        ...newFields[i],
+                        references: targetTable,
+                        referencesField: targetPKName, // 🆕 Guardar campo PK específico
+                        relationType: relationType
+                      };
+                      updateTable("fields", newFields);
+
                       // Eliminar relaciones FK previas si las había
                       if (setEdges && oldReference) {
-                        const filteredEdges = edges.filter(e => 
+                        const filteredEdges = edges.filter(e =>
                           !(e.source === targetNode.id && e.target === selectedNode.id && e.label?.includes("‒"))
                         );
                         setEdges(filteredEdges);
 
                         // Emitir eliminación de edges previos si hay socket
                         if (socket && project) {
-                          edges.filter(e => 
+                          edges.filter(e =>
                             e.source === targetNode.id && e.target === selectedNode.id && e.label?.includes("‒")
                           ).forEach(oldEdge => {
                             socket.emit("diagram-change", {
@@ -509,15 +505,15 @@ export default function PropertiesPanel({
                         target: selectedNode.id, // Tabla con FK
                         label: relationType,
                         animated: edgeStyle.animated,
-                        style: { 
-                          stroke: edgeStyle.stroke, 
+                        style: {
+                          stroke: edgeStyle.stroke,
                           strokeWidth: edgeStyle.strokeWidth,
                           strokeDasharray: edgeStyle.strokeDasharray // 🆕 Línea punteada
                         },
                         type: edgeStyle.type,
-                        labelStyle: { 
-                          fill: edgeStyle.stroke, 
-                          fontWeight: 700, 
+                        labelStyle: {
+                          fill: edgeStyle.stroke,
+                          fontWeight: 700,
                           fontSize: 12
                         },
                         labelBgStyle: edgeStyle.labelBgStyle,
@@ -525,10 +521,15 @@ export default function PropertiesPanel({
                           type: 'arrowclosed',
                           color: edgeStyle.stroke
                         },
-                        data: { relationType } // 🆕 Guardar tipo en data del edge
+                        // 🆕 Guardar campos específicos en data del edge
+                        data: {
+                          sourceField: targetPKName,           // Campo PK de la tabla referenciada
+                          targetField: newFields[i].name,      // Campo FK de esta tabla
+                          relationType: relationType
+                        }
                       };
 
-                      console.log("✅ [PropertiesPanel] Edge created:", newEdge);
+                      console.log("✅ [PropertiesPanel] Edge created:", newEdge.id, "Fields:", targetPKName, "→", newFields[i].name);
 
                       // Actualizar estado local
                       if (setEdges) {
@@ -568,20 +569,20 @@ export default function PropertiesPanel({
 
                   {/* 🆕 Mostrar tipo de relación actual */}
                   {f.relationType && (
-                    <div style={{ 
-                      marginTop: 6, 
-                      fontSize: 10, 
+                    <div style={{
+                      marginTop: 6,
+                      fontSize: 10,
                       opacity: 0.7,
                       display: "flex",
                       alignItems: "center",
                       gap: 4
                     }}>
                       <span>Tipo:</span>
-                      <span style={{ 
+                      <span style={{
                         fontWeight: "bold",
-                        color: f.relationType === "1-1" ? "#74b9ff" : 
-                               f.relationType === "1-N" ? "#00cec9" : 
-                               f.relationType === "N-N" ? "#ff7675" : "#aaa"
+                        color: f.relationType === "1-1" ? "#74b9ff" :
+                          f.relationType === "1-N" ? "#00cec9" :
+                            f.relationType === "N-N" ? "#ff7675" : "#aaa"
                       }}>
                         {f.relationType}
                       </span>

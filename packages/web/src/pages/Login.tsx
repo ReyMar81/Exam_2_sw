@@ -78,96 +78,122 @@ export default function Login() {
 
   return (
     <div style={{
+      height: "100vh",
       display: "flex",
+      flexDirection: "column",
       justifyContent: "center",
       alignItems: "center",
-      height: "100vh",
-      background: "#1a1a1a"
+      background: "linear-gradient(135deg, #1e1e2f, #27293d)",
+      color: "#fff",
+      fontFamily: "system-ui, -apple-system, sans-serif"
     }}>
       <div style={{
-        background: "#2a2a2a",
+        textAlign: "center",
+        maxWidth: "400px",
         padding: "40px",
-        borderRadius: "8px",
-        width: "400px",
-        color: "white"
+        background: "rgba(255,255,255,0.05)",
+        borderRadius: "16px",
+        backdropFilter: "blur(10px)",
+        border: "1px solid rgba(255,255,255,0.1)"
       }}>
-        <h2 style={{ marginBottom: "24px" }}>🔐 Iniciar sesión</h2>
+        <h1 style={{ 
+          fontSize: "42px", 
+          marginBottom: "8px",
+          background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+          WebkitBackgroundClip: "text",
+          WebkitTextFillColor: "transparent"
+        }}>
+          🧠 Diagramador ER Colaborativo
+        </h1>
+        <p style={{ 
+          fontSize: "16px", 
+          opacity: 0.8, 
+          marginBottom: "32px" 
+        }}>
+          Diseña, colabora y genera SQL con IA
+        </p>
         
         {error && (
           <div style={{
-            background: "rgba(244, 67, 54, 0.1)",
-            border: "1px solid rgba(244, 67, 54, 0.3)",
+            background: "rgba(244, 67, 54, 0.15)",
+            border: "1px solid rgba(244, 67, 54, 0.4)",
             borderRadius: "8px",
-            padding: "12px",
-            marginBottom: "16px",
+            padding: "12px 16px",
+            marginBottom: "20px",
             fontSize: "14px",
-            color: "#ff6b6b"
+            color: "#ff6b6b",
+            textAlign: "left"
           }}>
             ⚠️ {error}
           </div>
         )}
         
         <div style={{ marginBottom: "16px" }}>
-          <label style={{ display: "block", marginBottom: "8px", opacity: 0.8 }}>
-            Email
-          </label>
           <input 
             type="email"
-            placeholder="tu@email.com" 
+            placeholder="Email" 
             value={email} 
             onChange={(e) => setEmail(e.target.value)}
             onKeyPress={(e) => e.key === "Enter" && handleLogin()}
             style={{
               width: "100%",
-              padding: "12px",
-              borderRadius: "4px",
-              border: "1px solid #444",
-              background: "#333",
-              color: "white",
-              fontSize: "14px"
+              padding: "14px",
+              borderRadius: "8px",
+              border: "1px solid rgba(255,255,255,0.2)",
+              background: "rgba(255,255,255,0.1)",
+              color: "#fff",
+              fontSize: "15px",
+              outline: "none",
+              transition: "all 0.3s"
             }}
+            onFocus={(e) => e.currentTarget.style.borderColor = "rgba(102, 126, 234, 0.6)"}
+            onBlur={(e) => e.currentTarget.style.borderColor = "rgba(255,255,255,0.2)"}
           />
         </div>
-
+        
         <div style={{ marginBottom: "24px" }}>
-          <label style={{ display: "block", marginBottom: "8px", opacity: 0.8 }}>
-            Nombre
-          </label>
           <input 
             type="text"
-            placeholder="Tu nombre" 
+            placeholder="Nombre completo" 
             value={name} 
             onChange={(e) => setName(e.target.value)}
             onKeyPress={(e) => e.key === "Enter" && handleLogin()}
             style={{
               width: "100%",
-              padding: "12px",
-              borderRadius: "4px",
-              border: "1px solid #444",
-              background: "#333",
-              color: "white",
-              fontSize: "14px"
+              padding: "14px",
+              borderRadius: "8px",
+              border: "1px solid rgba(255,255,255,0.2)",
+              background: "rgba(255,255,255,0.1)",
+              color: "#fff",
+              fontSize: "15px",
+              outline: "none",
+              transition: "all 0.3s"
             }}
+            onFocus={(e) => e.currentTarget.style.borderColor = "rgba(102, 126, 234, 0.6)"}
+            onBlur={(e) => e.currentTarget.style.borderColor = "rgba(255,255,255,0.2)"}
           />
         </div>
-
+        
         <button 
-          onClick={handleLogin}
+          onClick={handleLogin} 
           disabled={loading}
           style={{
             width: "100%",
-            padding: "12px",
-            background: "#4CAF50",
-            color: "white",
+            padding: "14px",
+            background: loading ? "#555" : "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+            color: "#fff",
             border: "none",
-            borderRadius: "4px",
-            cursor: loading ? "not-allowed" : "pointer",
+            borderRadius: "8px",
             fontSize: "16px",
-            fontWeight: "bold",
+            fontWeight: "600",
+            cursor: loading ? "not-allowed" : "pointer",
+            transition: "all 0.3s",
             opacity: loading ? 0.6 : 1
           }}
+          onMouseEnter={(e) => !loading && (e.currentTarget.style.transform = "translateY(-2px)")}
+          onMouseLeave={(e) => !loading && (e.currentTarget.style.transform = "translateY(0)")}
         >
-          {loading ? "Ingresando..." : "Entrar"}
+          {loading ? "Entrando..." : "Iniciar Sesión / Registrarse"}
         </button>
       </div>
     </div>

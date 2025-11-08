@@ -4,25 +4,9 @@
  */
 
 import { Node, Edge } from "reactflow";
+import type { Field, TableData } from "@shared/types";
 
-export interface Field {
-  id: number;
-  name: string;
-  type: string;
-  isPrimary?: boolean;
-  isForeign?: boolean;
-  nullable?: boolean;
-  references?: string | null;
-  relationType?: string; // 🆕 Tipo de relación: "1-1", "1-N", "N-N"
-  unique?: boolean;
-  defaultValue?: string;
-}
-
-export interface TableData {
-  name: string;
-  fields: Field[];
-  label?: string;
-}
+export type { Field, TableData };
 
 /**
  * Determina cuál tabla debe tener la PK y cuál la FK al crear una relación
@@ -67,9 +51,9 @@ export function createFKField(
   const pkField = pkTable.data.fields.find((f) => f.isPrimary);
   if (!pkField) return undefined;
 
-  // Verificar si ya existe un FK hacia esta tabla
+  // Verificar si ya existe un FK hacia esta tabla y campo específico
   const existingFK = fkTable.data.fields.find(
-    (f) => f.isForeign && f.references === pkTable.data.name
+    (f) => f.isForeign && f.references === pkTable.data.name && f.referencesField === pkField.name
   );
 
   if (existingFK) {
@@ -86,7 +70,8 @@ export function createFKField(
     type: pkField.type,
     isForeign: true,
     nullable: false,
-    references: pkTable.data.name,
+    references: pkTable.data.name, // Nombre de la tabla
+    referencesField: pkField.name, // 🆕 Nombre del campo PK específico
     relationType: relationType || "1-N", // 🆕 Guardar tipo de relación
   };
 

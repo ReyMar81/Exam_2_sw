@@ -1,5 +1,7 @@
 import { io, Socket } from "socket.io-client";
 
+const SOCKET_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+
 let socket: Socket | null = null;
 
 /**
@@ -10,7 +12,7 @@ export function getSocket(user?: any): Socket | null {
   if (!socket && user) {
     console.log("🔌 [SocketManager] Creating new socket connection for user:", user.id);
     
-    socket = io("http://localhost:3001", {
+    socket = io(SOCKET_URL, {
       transports: ["websocket"],
       auth: {
         userId: user.id,

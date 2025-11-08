@@ -1,25 +1,10 @@
 import React from "react";
 import { Handle, Position } from "reactflow";
-
-export interface Field {
-  id: string | number;
-  name: string;
-  type: string;
-  isPrimary?: boolean;
-  isForeign?: boolean;
-  nullable?: boolean;
-  references?: string | null;
-}
-
-interface TableNodeData {
-  label?: string;
-  name?: string;
-  fields?: Field[];
-}
+import type { Field, TableData } from "@shared/types";
 
 interface TableNodeProps {
   id: string;
-  data: TableNodeData;
+  data: TableData;
   selected?: boolean;
 }
 

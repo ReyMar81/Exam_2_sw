@@ -1,15 +1,6 @@
 import React from "react";
 import { Node, Edge } from "reactflow";
-
-interface Field {
-  id: string | number;
-  name: string;
-  type: string;
-  isPrimary?: boolean;
-  isForeign?: boolean;
-  nullable?: boolean;
-  references?: string | null;
-}
+import type { Field } from "@shared/types";
 
 interface SidebarProps {
   nodes: Node[];
@@ -28,7 +19,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onExportSQL,
   onDeleteNode
 }) => {
-  const tableNodes = nodes.filter(n => n.type === 'table' || n.type === 'class');
+  const tableNodes = nodes.filter(n => n.type === 'table');
   const selectedNodeData = tableNodes.find(n => n.id === selectedNode);
   
   return (

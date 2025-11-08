@@ -1,55 +1,39 @@
 import { Node, Edge } from "reactflow";
-
-interface Field {
-  id: string | number;
-  name: string;
-  type: string;
-  isPrimary?: boolean;
-  isForeign?: boolean;
-  nullable?: boolean;
-  references?: string | null;
-}
-
-interface TableNodeData {
-  name?: string;
-  label?: string;
-  fields?: Field[];
-}
+import type { Field, TableData } from "@shared/types";
 
 /**
  * Genera un script SQL completo con CREATE TABLE, PRIMARY KEY, FOREIGN KEY
  * y constraints apropiados para PostgreSQL
  */
 export function generateSQL(nodes: Node[], edges: Edge[]): string {
-  const tableNodes = nodes.filter(n => n.type === 'table' || n.type === 'class');
+  const tableNodes = nodes.filter(n => n.type === 'table');
   
   if (tableNodes.length === 0) {
     return "-- No hay tablas en el diagrama\n";
   }
 
-  let sql = "-- ====================================\n";
-  sql += "-- Script SQL generado automáticamente\n";
-  sql += `-- Fecha: ${new Date().toLocaleString()}\n`;
-  sql += `-- Tablas: ${tableNodes.length} | Relaciones: ${edges.length}\n`;
-  sql += "-- Motor: PostgreSQL\n";
-  sql += "-- ====================================\n\n";
+  let sql = `-- PostgreSQL Script | ${new Date().toLocaleString()}\n`;
+  sql += `-- Tablas: ${tableNodes.length} | Relaciones: ${edges.length}\n\n`;
 
-  // === PASO 1: CREATE TABLE para cada tabla ===
-  sql += "-- ====================================\n";
-  sql += "-- CREACIÓN DE TABLAS\n";
-  sql += "-- ====================================\n\n";
+  // === PASO 1: ORDENAMIENTO DE TABLAS POR DEPENDENCIAS ===
 
-  tableNodes.forEach(node => {
-    const data = node.data as TableNodeData;
+  // Función auxiliar para generar el SQL de una tabla
+  const generateTableSQL = (node: Node): { 
+    tableName: string; 
+    sql: string; 
+    foreignKeys: string[];
+    hasFK: boolean;
+  } => {
+    const data = node.data as TableData;
     const tableName = (data.name || data.label || "tabla_sin_nombre").toLowerCase().replace(/\s+/g, '_');
     const fields = data.fields || [];
 
-    sql += `CREATE TABLE ${tableName} (\n`;
+    let tableSql = `CREATE TABLE ${tableName} (\n`;
     
-    // Agregar columnas
     const columns: string[] = [];
     const primaryKeys: string[] = [];
     const foreignKeys: { field: string; references: string }[] = [];
+    const referencedTables: string[] = [];
 
     fields.forEach((field) => {
       const columnName = field.name.toLowerCase().replace(/\s+/g, '_');
@@ -57,49 +41,129 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
       
       let columnDef = `  ${columnName} ${columnType}`;
       
-      // Agregar NOT NULL si corresponde
       if (!field.nullable || field.isPrimary) {
         columnDef += " NOT NULL";
       }
 
       columns.push(columnDef);
 
-      // Recolectar PKs
       if (field.isPrimary) {
         primaryKeys.push(columnName);
       }
 
-      // Recolectar FKs
       if (field.isForeign && field.references) {
+        const refTable = field.references.toLowerCase().replace(/\s+/g, '_');
         foreignKeys.push({
           field: columnName,
-          references: field.references.toLowerCase().replace(/\s+/g, '_')
+          references: refTable
         });
+        referencedTables.push(refTable);
       }
     });
 
-    // Escribir columnas
-    sql += columns.join(",\n");
+    tableSql += columns.join(",\n");
 
-    // Agregar constraint de PRIMARY KEY
     if (primaryKeys.length > 0) {
-      sql += `,\n  PRIMARY KEY (${primaryKeys.join(", ")})`;
+      tableSql += `,\n  PRIMARY KEY (${primaryKeys.join(", ")})`;
     }
 
-    // Agregar constraints de FOREIGN KEY
     foreignKeys.forEach(fk => {
-      sql += `,\n  FOREIGN KEY (${fk.field}) REFERENCES ${fk.references}(id) ON DELETE CASCADE`;
+      tableSql += `,\n  FOREIGN KEY (${fk.field}) REFERENCES ${fk.references}(id) ON DELETE CASCADE`;
     });
 
-    sql += "\n);\n\n";
+    tableSql += "\n);\n\n";
+
+    return {
+      tableName,
+      sql: tableSql,
+      foreignKeys: referencedTables,
+      hasFK: referencedTables.length > 0
+    };
+  };
+
+  // Preparar metadata de todas las tablas
+  const tablesInfo = tableNodes.map(node => ({
+    node,
+    ...generateTableSQL(node)
+  }));
+
+  // Separar tablas: sin FK (base) vs con FK (dependientes)
+  const tablasBase: typeof tablesInfo = [];
+  const pendientes: typeof tablesInfo = [];
+
+  tablesInfo.forEach(table => {
+    if (!table.hasFK) {
+      // ✅ Tabla sin llaves foráneas: se crea inmediatamente
+      tablasBase.push(table);
+    } else {
+      // ⏳ Tabla con llaves foráneas: se guarda para procesar después
+      pendientes.push(table);
+    }
   });
+
+  sql += `-- Base: ${tablasBase.length} | Dependientes: ${pendientes.length}\n\n`;
+
+  // === PASO 1.1: Crear tablas base (sin FK) ===
+  if (tablasBase.length > 0) {
+    tablasBase.forEach(table => {
+      sql += `-- ${table.tableName}\n`;
+      sql += table.sql;
+    });
+  }
+
+  // === PASO 1.2: Resolver tablas con dependencias ===
+  if (pendientes.length > 0) {
+    const createdTables = new Set<string>(tablasBase.map(t => t.tableName));
+    const remainingTables = [...pendientes];
+    let iteration = 0;
+    const maxIterations = pendientes.length * 2; // Prevenir loops infinitos
+
+    // Algoritmo de resolución iterativa de dependencias
+    while (remainingTables.length > 0 && iteration < maxIterations) {
+      iteration++;
+      let progressMade = false;
+
+      // Intentar crear tablas cuyas dependencias ya están satisfechas
+      for (let i = remainingTables.length - 1; i >= 0; i--) {
+        const table = remainingTables[i];
+        
+        // Verificar si todas las tablas referenciadas ya fueron creadas
+        const allDependenciesMet = table.foreignKeys.every(refTable => 
+          createdTables.has(refTable)
+        );
+
+        if (allDependenciesMet) {
+          // ✅ Dependencias satisfechas: crear esta tabla
+          sql += `-- ${table.tableName} → ${table.foreignKeys.join(", ")}\n`;
+          sql += table.sql;
+          
+          createdTables.add(table.tableName);
+          remainingTables.splice(i, 1);
+          progressMade = true;
+        }
+      }
+
+      // Si no se pudo crear ninguna tabla en esta iteración, hay dependencias circulares
+      if (!progressMade) {
+        break;
+      }
+    }
+
+    // === PASO 1.3: Manejar dependencias circulares o sin resolver ===
+    if (remainingTables.length > 0) {
+      sql += "\n-- ⚠️ DEPENDENCIAS NO RESUELTAS (circulares o referencias faltantes)\n";
+      sql += "-- Solución: Crear sin FKs y agregar después con ALTER TABLE\n\n";
+
+      remainingTables.forEach(table => {
+        const missingDeps = table.foreignKeys.filter(ref => !createdTables.has(ref));
+        sql += `-- ❌ ${table.tableName} → requiere: ${missingDeps.join(", ")}\n`;
+        sql += `${table.sql.split('\n').map(line => '-- ' + line).join('\n')}\n`;
+      });
+    }
+  }
 
   // === PASO 2: Relaciones basadas en edges (opcional, para relaciones adicionales) ===
   if (edges.length > 0) {
-    sql += "-- ====================================\n";
-    sql += "-- RELACIONES ADICIONALES (N-N)\n";
-    sql += "-- ====================================\n\n";
-
     const processedEdges = new Set<string>();
 
     edges.forEach((edge, index) => {
@@ -108,11 +172,11 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
 
       if (!sourceNode || !targetNode) return;
 
-      const sourceTable = ((sourceNode.data as TableNodeData).name || 
-                          (sourceNode.data as TableNodeData).label || 
+      const sourceTable = ((sourceNode.data as TableData).name || 
+                          (sourceNode.data as TableData).label || 
                           "tabla_origen").toLowerCase().replace(/\s+/g, '_');
-      const targetTable = ((targetNode.data as TableNodeData).name || 
-                          (targetNode.data as TableNodeData).label || 
+      const targetTable = ((targetNode.data as TableData).name || 
+                          (targetNode.data as TableData).label || 
                           "tabla_destino").toLowerCase().replace(/\s+/g, '_');
       
       // Detectar tipo de relación desde el label del edge
@@ -123,11 +187,9 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
       if (processedEdges.has(edgeKey)) return;
       processedEdges.add(edgeKey);
 
-      sql += `-- Relación ${index + 1}: ${sourceTable} → ${targetTable} (${relationType})\n`;
-
       if (relationType.includes("N-N") || relationType.includes("N:N") || relationType.includes("MANY-TO-MANY")) {
-        // Relación N-N: crear tabla intermedia
         const junctionTable = `${sourceTable}_${targetTable}`;
+        sql += `\n-- N-N: ${sourceTable} ↔ ${targetTable}\n`;
         sql += `CREATE TABLE IF NOT EXISTS ${junctionTable} (\n`;
         sql += `  id SERIAL PRIMARY KEY,\n`;
         sql += `  ${sourceTable}_id INT NOT NULL,\n`;
@@ -139,17 +201,10 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
         sql += `);\n\n`;
         
         sql += `CREATE INDEX idx_${junctionTable}_${sourceTable} ON ${junctionTable}(${sourceTable}_id);\n`;
-        sql += `CREATE INDEX idx_${junctionTable}_${targetTable} ON ${junctionTable}(${targetTable}_id);\n\n`;
+        sql += `CREATE INDEX idx_${junctionTable}_${targetTable} ON ${junctionTable}(${targetTable}_id);\n`;
       }
-      // Las relaciones 1-1 y 1-N ya se manejan con los campos FK marcados en los nodos
     });
   }
-
-  sql += "-- ====================================\n";
-  sql += "-- FIN DEL SCRIPT\n";
-  sql += "-- ====================================\n";
-  sql += "\n-- Para ejecutar este script en PostgreSQL:\n";
-  sql += "-- psql -U usuario -d nombre_base_datos -f archivo.sql\n";
 
   return sql;
 }

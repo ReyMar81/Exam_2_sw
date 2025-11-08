@@ -1,9 +1,10 @@
 # --- build web ---
 FROM node:18-alpine AS webbuild
 WORKDIR /app
-COPY packages/web ./packages/web
 COPY package.json ./
 COPY packages/web/package.json ./packages/web/
+COPY packages/web ./packages/web
+RUN npm install --global patch-package
 RUN cd packages/web && npm install && npm run build
 
 # --- build server ---
