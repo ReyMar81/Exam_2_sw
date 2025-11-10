@@ -35,6 +35,11 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
     const foreignKeys: { field: string; references: string }[] = [];
     const referencedTables: string[] = [];
 
+    // Detectar si es join table pura (solo 2 FKs, sin columnas adicionales)
+    const foreignKeyFields = fields.filter(f => f.isForeign);
+    const nonFkNonPkFields = fields.filter(f => !f.isForeign && !f.isPrimary);
+    const isPureJoinTable = foreignKeyFields.length === 2 && nonFkNonPkFields.length === 0;
+
     fields.forEach((field) => {
       const columnName = field.name.toLowerCase().replace(/\s+/g, '_');
       const columnType = field.type || "VARCHAR(255)";
@@ -47,7 +52,8 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
 
       columns.push(columnDef);
 
-      if (field.isPrimary) {
+      // Si es join pura, NO agregar id como PK (usaremos PK compuesta)
+      if (field.isPrimary && !isPureJoinTable) {
         primaryKeys.push(columnName);
       }
 
@@ -63,7 +69,12 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
 
     tableSql += columns.join(",\n");
 
-    if (primaryKeys.length > 0) {
+    // PRIMARY KEY: compuesta para joins puras, normal para el resto
+    if (isPureJoinTable && foreignKeys.length === 2) {
+      // Join pura: PK compuesta de las 2 FKs
+      tableSql += `,\n  PRIMARY KEY (${foreignKeys[0].field}, ${foreignKeys[1].field})`;
+    } else if (primaryKeys.length > 0) {
+      // Tabla normal: PK estándar
       tableSql += `,\n  PRIMARY KEY (${primaryKeys.join(", ")})`;
     }
 
@@ -191,13 +202,11 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
         const junctionTable = `${sourceTable}_${targetTable}`;
         sql += `\n-- N-N: ${sourceTable} ↔ ${targetTable}\n`;
         sql += `CREATE TABLE IF NOT EXISTS ${junctionTable} (\n`;
-        sql += `  id SERIAL PRIMARY KEY,\n`;
         sql += `  ${sourceTable}_id INT NOT NULL,\n`;
         sql += `  ${targetTable}_id INT NOT NULL,\n`;
-        sql += `  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,\n`;
+        sql += `  PRIMARY KEY (${sourceTable}_id, ${targetTable}_id),\n`;
         sql += `  FOREIGN KEY (${sourceTable}_id) REFERENCES ${sourceTable}(id) ON DELETE CASCADE,\n`;
-        sql += `  FOREIGN KEY (${targetTable}_id) REFERENCES ${targetTable}(id) ON DELETE CASCADE,\n`;
-        sql += `  UNIQUE (${sourceTable}_id, ${targetTable}_id)\n`;
+        sql += `  FOREIGN KEY (${targetTable}_id) REFERENCES ${targetTable}(id) ON DELETE CASCADE\n`;
         sql += `);\n\n`;
         
         sql += `CREATE INDEX idx_${junctionTable}_${sourceTable} ON ${junctionTable}(${sourceTable}_id);\n`;

@@ -65,32 +65,109 @@ Herramienta integral para acelerar el desarrollo de sistemas de gestión mediant
   - Conexión visual entre tablas con detección automática PK/FK
   - Creación automática de tablas intermedias para N-N
 - [x] **Generación de Script PostgreSQL**
-  - Exportación a `.sql` con CREATE TABLE
-  - PRIMARY KEY y FOREIGN KEY constraints
-  - Tablas intermedias para relaciones N-N
-  - Índices automáticos
-  - ON DELETE CASCADE configurado
+  - Exportación a `.sql` con CREATE TABLE optimizado
+  - **Algoritmo de resolución de dependencias:** Ordenamiento topológico automático
+    - Tablas base (sin FK) se crean primero
+    - Tablas dependientes en orden correcto
+    - Detección de dependencias circulares con advertencias
+  - **Detección inteligente de tablas intermedias (N:M):**
+    - **Join pura** (solo 2 FKs): Clave primaria compuesta `PRIMARY KEY (fk1, fk2)`
+    - **Join extendida** (2 FKs + columnas extra): `id SERIAL PRIMARY KEY` normal
+  - PRIMARY KEY y FOREIGN KEY constraints con `ON DELETE CASCADE`
+  - Índices automáticos en tablas intermedias para optimizar búsquedas
+  - Validación de integridad referencial
+  - Scripts listos para ejecutar en PostgreSQL 12+
+- [x] **Generación de Backend Spring Boot**
+  - Generación automática de proyecto **Maven completo** en ZIP descargable
+  - Estructura estándar profesional: `entity / repository / service / controller`
+  - **Arquitectura generada:**
+    - **Entities** con anotaciones JPA completas:
+      - `@Entity`, `@Table`, `@Id`, `@GeneratedValue(strategy = IDENTITY)`
+      - Relaciones: `@ManyToOne`, `@OneToMany`, `@ManyToMany` con `@JoinTable`
+      - Lombok: `@Data`, `@NoArgsConstructor`, `@AllArgsConstructor` para getters/setters
+    - **Repositories** extendiendo `JpaRepository<T, ID>` con CRUD incorporado
+    - **Services** con lógica de negocio completa:
+      - `findAll()`, `findById()`, `save()`, `update()`, `delete()`
+      - Validaciones básicas y manejo de errores
+    - **Controllers REST** con endpoints funcionales:
+      - `GET /{entidad}` - Listar todos
+      - `GET /{entidad}/{id}` - Obtener por ID
+      - `POST /{entidad}` - Crear
+      - `PUT /{entidad}/{id}` - Actualizar
+      - `DELETE /{entidad}/{id}` - Eliminar
+      - CORS habilitado con `@CrossOrigin(origins = "*")`
+  - **Detección inteligente de tablas intermedias:**
+    - **Join pura** (solo 2 FKs): No genera entidad, usa `@ManyToMany` en entidades principales
+    - **Join extendida** (2 FKs + campos): Genera entidad completa con CRUD
+  - **Base de datos:** H2 en memoria (`jdbc:h2:mem:testdb`) con auto-creación de esquema
+  - **Configuración incluida:**
+    - `pom.xml` con Spring Boot 3.2, JPA, H2, Lombok
+    - `application.properties` con puerto aleatorio (8180-9080)
+    - `Dockerfile` multi-stage optimizado (Maven build + JRE Alpine runtime)
+    - `docker-compose.yml` con healthcheck y restart policy
+    - `.dockerignore` para builds eficientes
+    - `README.md` con instrucciones completas
+  - **Archivo principal nombrado correctamente:** `{ProjectName}Application.java`
+  - **Mapeo automático de tipos:** SQL → Java (INT→Long, VARCHAR→String, TIMESTAMP→LocalDateTime)
+  - **Conversión de nombres:** snake_case → PascalCase/camelCase
+  - **Listo para ejecutar:**
+    - Con Maven: `mvn spring-boot:run`
+    - Con Docker: `docker compose up --build`
+  - **Compatible con:** Java 17+, Maven 3.6+, Postman, H2 Console (`/h2-console`)
+  - **Endpoints generados** según nombres reales de las entidades del diagrama
+- [x] **Generación de Frontend Flutter**
+  - Generación automática de proyecto **Flutter completo** en ZIP descargable
+  - Estructura estándar profesional con **Material Design 3**
+  - **Arquitectura generada:**
+    - **Models** con null-safety completo:
+      - IDs autogenerados: `int?` (nullable)
+      - Foreign Keys: `int?` en ENTITY, `int` (required) en JOIN tables
+      - Campos obligatorios: `required` keyword en constructores
+      - Métodos: `fromJson()`, `toJson()`, `copyWith()`
+      - **Composite keys** para JOIN_ENRICHED: método `getCompositeKey()`
+    - **API Service** con modo dual:
+      - **Modo local** (por defecto): Datos mock para testing inmediato
+      - **Modo backend**: Conexión HTTP a Spring Boot
+      - Configuración simple: flag `useBackend` en `api_service.dart`
+      - Endpoints completos: GET, POST, PUT, DELETE por entidad
+      - Manejo de composite keys para tablas intermedias enriquecidas
+    - **Providers** con gestión de estado (Provider package):
+      - CRUD completo: `fetchAll()`, `create()`, `update()`, `delete()`
+      - Estados: `items`, `isLoading`, `error`
+      - Lógica diferenciada: PK simple vs composite key
+      - `ChangeNotifier` para reactividad automática
+    - **Screens** con UI completa:
+      - **ListScreen**: Listado con búsqueda, eliminación con confirmación
+      - **FormScreen**: Formulario create/edit con validación
+      - **Navigation Drawer**: Menú lateral en todas las screens con íconos
+        - Entidades normales: ícono `table_chart`
+        - Tablas intermedias enriquecidas: ícono `link`
+      - Navegación automática entre entidades con rutas nombradas
+  - **Clasificación inteligente de tablas (coherente con SQL/Spring Boot):**
+    - **ENTITY** (tabla normal): Genera CRUD completo
+    - **JOIN_PURE** (solo 2 FKs): **NO genera código** (relación manejada en backend)
+    - **JOIN_ENRICHED** (2+ FKs + datos): Genera CRUD con composite key
+    - Lógica centralizada en `relationUtils.ts` compartida entre generadores
+  - **Configuración incluida:**
+    - `pubspec.yaml` con dependencias: provider 6.1.0, http 1.2.0
+    - `analysis_options.yaml` con Flutter lints
+    - `.gitignore` completo para Flutter
+    - `README.md` con instrucciones de:
+      - Instalación (`flutter pub get`)
+      - Ejecución (`flutter run`, `flutter run -d chrome`)
+      - Configuración de backend (cambiar `useBackend` y `baseUrl`)
+      - Estructura del proyecto generada
+      - Lista de entidades con endpoints
+  - **Mapeo automático de tipos:** SQL → Dart (INT→int, VARCHAR→String, TIMESTAMP→DateTime)
+  - **Conversión de nombres:** snake_case → PascalCase (clases), camelCase (propiedades)
+  - **Listo para ejecutar:**
+    - Instalación: `flutter pub get`
+    - Web: `flutter run -d chrome`
+    - Android/iOS: `flutter run`
+  - **Compatible con:** Flutter 3.0+, Dart 3.0+, Material Design 3
 
 ### ⏳ Pendiente de Implementación
 
-- [ ] **Generación de Backend Spring Boot**
-  - Estructura Maven/Gradle completa
-  - Entities con anotaciones JPA (@Entity, @Table, @Column, etc.)
-  - Repositories extendiendo JpaRepository
-  - Services con lógica CRUD
-  - Controllers REST con @GetMapping, @PostMapping, etc.
-  - DTOs para Request/Response
-  - application.properties configurado
-  - Proyecto listo para `mvn spring-boot:run`
-- [ ] **Generación de Frontend Flutter**
-  - Estructura de proyecto Flutter completa
-  - Models (clases Dart desde entidades)
-  - Providers/BLoC para estado
-  - Screens CRUD (List, Create, Edit, Delete)
-  - Widgets reutilizables (forms, cards, botones)
-  - API service con http package
-  - Configuración básica (pubspec.yaml, main.dart)
-  - Listo para `flutter run` → APK funcional
 - [ ] **Diseño Asistido por IA**
   - Generación de diagramas desde prompt de texto
   - Reconocimiento de voz para creación de tablas
@@ -157,7 +234,10 @@ EXAM_2_SW/
 │           │   ├── relationHandler.ts # Lógica de relaciones
 │           │   ├── relationPrompt.ts  # Modal de tipo de relación
 │           │   ├── relationStyles.ts  # Estilos de edges
-│           │   └── sqlGenerator.ts    # Generador SQL ⭐
+│           │   ├── relationUtils.ts   # Clasificación centralizada de tablas ⭐
+│           │   ├── sqlGenerator.ts    # Generador SQL ⭐
+│           │   ├── springBootGenerator.ts # Generador Spring Boot ⭐
+│           │   └── flutterGenerator.ts    # Generador Flutter ⭐
 │           │
 │           ├── api.ts               # Cliente Axios con env vars
 │           ├── App.tsx              # Componente raíz
@@ -605,35 +685,581 @@ _Legacy (Compatibilidad):_
 
 **`sqlGenerator.ts`** ⭐
 
-> Generador automático de scripts SQL desde diagrama ER
+> Generador automático de scripts SQL optimizados desde diagrama ER con detección inteligente de tablas intermedias
 
 - **Funciones principales:**
-  - `generateSQL(nodes, edges)` - Crea script SQL completo:
-    - Header con metadatos (fecha, cantidad tablas/relaciones)
-    - CREATE TABLE para cada tabla con todas las columnas
-    - PRIMARY KEY constraints
-    - FOREIGN KEY constraints con ON DELETE CASCADE
-    - Tablas intermedias para relaciones N-N con índices optimizados
-    - Comentarios explicativos y comandos de ejecución
-  - `downloadSQL(sql, fileName)` - Descarga SQL como archivo .sql
-- Soporta PostgreSQL específicamente
-- Normaliza nombres (lowercase, sin espacios)
-- Detecta tipo de relación desde edge label
-- Genera índices automáticos en tablas intermedias
-- **⚠️ Nota:** No valida si las tablas ya existen (podría agregar IF NOT EXISTS)
+  - `generateSQL(nodes, edges)` - Crea script SQL completo con ordenamiento inteligente:
+    - **Algoritmo de resolución de dependencias:** Ordenamiento topológico
+      - Separa tablas base (sin FK) vs dependientes (con FK)
+      - Crea tablas en orden correcto automáticamente
+      - Detección de dependencias circulares con advertencias
+    - **Detección inteligente de tablas intermedias (N:M):**
+      - **Join pura** (exactamente 2 FKs, sin otras columnas):
+        - Genera `PRIMARY KEY (fk1, fk2)` compuesta
+        - No incluye campo `id` separado
+        - Ideal para relaciones puras many-to-many
+      - **Join extendida** (2 FKs + columnas adicionales):
+        - Genera `id SERIAL PRIMARY KEY` normal
+        - Permite campos extra (cantidad, fecha, etc.)
+        - Funciona como entidad completa
+    - CREATE TABLE con todas las columnas y constraints
+    - PRIMARY KEY y FOREIGN KEY con `ON DELETE CASCADE`
+    - Tablas intermedias para relaciones N-N automáticas desde edges
+    - Índices automáticos en FKs para optimizar búsquedas
+    - Comentarios mínimos para producción
+  - `downloadSQL(sql, fileName)` - Descarga SQL como archivo `.sql`
+- **Ejemplos generados:**
+
+  ```sql
+  -- Join pura (proyecto_etiqueta)
+  CREATE TABLE proyecto_etiqueta (
+    proyecto_id INT NOT NULL,
+    etiqueta_id INT NOT NULL,
+    PRIMARY KEY (proyecto_id, etiqueta_id),
+    FOREIGN KEY (proyecto_id) REFERENCES proyecto(id) ON DELETE CASCADE,
+    FOREIGN KEY (etiqueta_id) REFERENCES etiqueta(id) ON DELETE CASCADE
+  );
+
+  -- Join extendida (carrito)
+  CREATE TABLE carrito (
+    id SERIAL PRIMARY KEY,
+    usuario_id INT NOT NULL,
+    producto_id INT NOT NULL,
+    cantidad INT NOT NULL,
+    fecha TIMESTAMP DEFAULT now(),
+    FOREIGN KEY (usuario_id) REFERENCES usuario(id),
+    FOREIGN KEY (producto_id) REFERENCES producto(id)
+  );
+  ```
+
+- Soporte: PostgreSQL 12+
+- Normalización automática de nombres (lowercase, snake_case)
+- Compatible con Prisma, TypeORM y Sequelize
+
+**`springBootGenerator.ts`** ⭐
+
+> Generador automático de proyectos Spring Boot completos desde diagrama ER con Docker integrado
+
+- **Función principal:**
+  - `generateSpringBootProject(model, projectName)` - Genera ZIP con proyecto Maven completo:
+    - **Estructura del proyecto:**
+      - `pom.xml` - Maven con Spring Boot 3.2, JPA, H2, Lombok
+      - `Dockerfile` - Multi-stage build (Maven + JRE Alpine optimizado)
+      - `docker-compose.yml` - Configuración lista para ejecutar con puerto dinámico
+      - `.dockerignore` - Optimización de build Docker
+      - `application.properties` - H2 en memoria con puerto aleatorio (8180-9080)
+      - `{ProjectName}Application.java` - Clase principal correctamente nombrada
+      - `src/main/java/{package}/entity/` - Entidades JPA
+      - `src/main/java/{package}/repository/` - Repositorios JPA
+      - `src/main/java/{package}/service/` - Servicios con lógica CRUD
+      - `src/main/java/{package}/controller/` - Controllers REST
+      - `README.md` - Documentación completa con ejemplos cURL
+    - **Entidades JPA con Lombok:**
+      - Anotaciones: `@Entity`, `@Table`, `@Data`, `@NoArgsConstructor`, `@AllArgsConstructor`
+      - Primary Keys: `@Id` + `@GeneratedValue(strategy = IDENTITY)`
+      - **Detección inteligente de relaciones:**
+        - **Join pura** (solo 2 FKs sin columnas extra):
+          - ❌ NO genera entidad Java separada
+          - ✅ Genera `@ManyToMany` con `@JoinTable` en entidades principales
+          - Ejemplo: `proyecto_etiqueta` → relación en Proyecto.java y Etiqueta.java
+        - **Join extendida** (2 FKs + campos adicionales):
+          - ✅ Genera entidad completa con `@Id` autoincremental
+          - ✅ Genera CRUD completo (Repository, Service, Controller)
+          - Relaciones: `@ManyToOne` para las FKs
+          - Ejemplo: `carrito` con campos cantidad, fecha
+        - Relaciones normales: `@ManyToOne`, `@OneToMany` según corresponda
+    - **Repositorios:** Interfaces extendiendo `JpaRepository<Entity, Long>`
+    - **Servicios:** CRUD completo
+      - `findAll()` - Listar todos los registros
+      - `findById(id)` - Buscar por ID
+      - `save(entity)` - Crear nuevo
+      - `update(id, entity)` - Actualizar existente
+      - `delete(id)` - Eliminar por ID
+    - **Controllers REST con endpoints funcionales:**
+      - `GET /{entidad}` - Listar todos
+      - `GET /{entidad}/{id}` - Obtener por ID
+      - `POST /{entidad}` - Crear nuevo
+      - `PUT /{entidad}/{id}` - Actualizar
+      - `DELETE /{entidad}/{id}` - Eliminar
+      - `@CrossOrigin(origins = "*")` - CORS habilitado
+    - **Base de datos H2:**
+      - URL: `jdbc:h2:mem:testdb`
+      - Console: `/h2-console` (User: `sa`, Password: vacío)
+      - JPA: `spring.jpa.hibernate.ddl-auto=create-drop` (auto-crea tablas)
+  - `downloadSpringBootProject(zipBuffer, projectName)` - Descarga ZIP
+- **Características avanzadas:**
+  - Puerto aleatorio (8180-9080) para evitar conflictos
+  - Dockerfile multi-stage para imágenes optimizadas (~200MB)
+  - Usuario no-root en contenedor por seguridad
+  - Healthcheck integrado en docker-compose
+  - README con ejemplos cURL y instrucciones Docker/Maven
+- **Mapeo de tipos SQL → Java:**
+  - `INT/SERIAL` → `Long`
+  - `VARCHAR/TEXT` → `String`
+  - `BOOLEAN` → `Boolean`
+  - `DECIMAL/NUMERIC` → `Double`
+  - `TIMESTAMP/DATETIME` → `LocalDateTime`
+  - `DATE` → `LocalDate`
+  - `TIME` → `LocalTime`
+- **Conversión de nombres:**
+  - snake_case → PascalCase (clases)
+  - snake_case → camelCase (variables)
+- **Ejemplos generados:**
+
+  ```java
+  // Join pura: NO genera entidad, usa @ManyToMany
+  @Entity
+  @Data
+  @NoArgsConstructor
+  @AllArgsConstructor
+  public class Proyecto {
+      @Id
+      @GeneratedValue(strategy = GenerationType.IDENTITY)
+      private Long id;
+
+      @ManyToMany
+      @JoinTable(
+          name = "proyecto_etiqueta",
+          joinColumns = @JoinColumn(name = "proyecto_id"),
+          inverseJoinColumns = @JoinColumn(name = "etiqueta_id")
+      )
+      private Set<Etiqueta> etiquetas = new HashSet<>();
+  }
+
+  // Join extendida: Genera entidad completa
+  @Entity
+  @Table(name = "carrito")
+  @Data
+  @NoArgsConstructor
+  @AllArgsConstructor
+  public class Carrito {
+      @Id
+      @GeneratedValue(strategy = GenerationType.IDENTITY)
+      private Long id;
+
+      @ManyToOne
+      @JoinColumn(name = "usuario_id")
+      private Usuario usuario;
+
+      @ManyToOne
+      @JoinColumn(name = "producto_id")
+      private Producto producto;
+
+      private Integer cantidad;
+      private LocalDateTime fecha;
+  }
+  ```
+
+- **Listo para ejecutar:**
+  - Maven: `mvn spring-boot:run`
+  - Docker: `docker compose up --build`
+- Soporte: Java 17+, Spring Boot 3.2, Maven 3.6+
+- Compatible con IntelliJ IDEA, Eclipse, VS Code
+- Listo para despliegue: Docker, Heroku, AWS Elastic Beanstalk
+
+**`relationUtils.ts`** ⭐⭐⭐
+
+> Módulo centralizado de clasificación de tablas para coherencia entre todos los generadores
+
+- **Propósito:** Garantizar que SQL, Spring Boot y Flutter clasifiquen tablas intermedias de la misma forma
+- **Tipos exportados:**
+
+  ```typescript
+  type TableKind = "ENTITY" | "JOIN_PURE" | "JOIN_ENRICHED";
+
+  interface TableClassification {
+    kind: TableKind;
+    foreignKeys: Field[];
+    nonForeignFields: Field[];
+    primaryKey: Field | null;
+  }
+  ```
+
+- **Funciones principales:**
+  - `classifyTable(fields: Field[]): TableClassification`
+    - Analiza la estructura de una tabla y retorna su clasificación
+    - **ENTITY:** Tabla normal con datos propios (0, 1, o más FKs)
+    - **JOIN_PURE:** Tabla intermedia N-M con SOLO 2 FKs (sin columnas adicionales)
+      - Ejemplo: `proyecto_etiqueta (proyecto_id, etiqueta_id)`
+      - Timestamps opcionales (created_at, updated_at) NO cuentan como campos adicionales
+    - **JOIN_ENRICHED:** Tabla intermedia N-M con 2+ FKs + columnas de datos
+      - Ejemplo: `carrito (usuario_id, producto_id, cantidad, fecha)`
+  - `shouldGenerateCRUD(kind: TableKind): boolean`
+    - Retorna `true` para ENTITY y JOIN_ENRICHED
+    - Retorna `false` para JOIN_PURE (solo relación, sin entidad propia)
+    - Usado por generadores para filtrar tablas a generar
+  - `needsCompositeKey(classification): boolean`
+    - Detecta si una tabla JOIN_ENRICHED necesita clave compuesta
+    - Retorna `true` si no tiene PK simple y tiene 2+ FKs
+- **Impacto en generadores:**
+  - **SQL:** JOIN_PURE obtiene `PRIMARY KEY (fk1, fk2)` compuesta
+  - **Spring Boot:** JOIN_PURE usa `@ManyToMany`, JOIN_ENRICHED genera Entity completa
+  - **Flutter:** JOIN_PURE NO genera código, JOIN_ENRICHED genera CRUD con composite key
+- **Ventajas:**
+  - ✅ Lógica única y mantenible en un solo lugar
+  - ✅ Consistencia garantizada entre backend y frontend
+  - ✅ Fácil de extender con nuevos tipos de tablas
+  - ✅ Reducción de bugs por diferencias de clasificación
+
+**`flutterGenerator.ts`** ⭐
+
+> Generador automático de proyectos Flutter completos desde diagrama ER con arquitectura Provider
+
+- **Función principal:**
+  - `generateFlutterProject(model, projectName)` - Genera ZIP con proyecto Flutter completo:
+    - **Estructura del proyecto:**
+      - `pubspec.yaml` - Dependencias: flutter, provider 6.1.0, http 1.2.0
+      - `analysis_options.yaml` - Flutter lints con reglas relajadas
+      - `.gitignore` - Archivos de Flutter/Dart/IDEs/Platforms
+      - `lib/main.dart` - App principal con MultiProvider y rutas nombradas
+      - `lib/models/{tabla}_model.dart` - Modelos Dart para cada entidad
+      - `lib/services/api_service.dart` - Servicio HTTP + datos mock
+      - `lib/providers/{tabla}_provider.dart` - Providers con estado CRUD
+      - `lib/screens/{tabla}_list_screen.dart` - Pantallas de listado
+      - `lib/screens/{tabla}_form_screen.dart` - Pantallas de formulario
+      - `README.md` - Documentación completa con instrucciones
+    - **Modelos Dart con null-safety:**
+      - Reglas de nullable:
+        - **IDs autogenerados:** `int?` (nullable, generado por backend)
+        - **Foreign Keys en ENTITY:** `int?` (nullable, opcional)
+        - **Foreign Keys en JOIN tables:** `int` (required, parte de la relación)
+        - **Campos NOT NULL:** Sin `?`, con `required` en constructor
+        - **Campos NULL:** Con `?`, sin `required`
+      - Métodos generados:
+        - `fromJson(Map<String, dynamic>)` - Deserialización desde API
+        - `toJson()` - Serialización para API
+        - `copyWith({...})` - Actualización inmutable de propiedades
+        - `getCompositeKey()` - Solo en JOIN*ENRICHED (ej: `"$userId*$productoId"`)
+      - Tipos mapeados: INT→int, VARCHAR→String, BOOLEAN→bool, TIMESTAMP→DateTime
+    - **API Service con modo dual:**
+      - **Configuración:**
+        ```dart
+        static const bool useBackend = false; // Cambiar a true para backend real
+        static const String baseUrl = "http://localhost:8080";
+        ```
+      - **Modo local (useBackend = false):**
+        - Datos mock generados automáticamente (2 registros de ejemplo por tabla)
+        - Delay artificial de 300ms para simular latencia de red
+        - Perfecto para desarrollo sin backend
+      - **Modo backend (useBackend = true):**
+        - Peticiones HTTP reales a Spring Boot
+        - Endpoints: GET /tabla, GET /tabla/:id, POST /tabla, PUT /tabla/:id, DELETE /tabla/:id
+        - Manejo de errores HTTP (throw Exception si statusCode != 200/201)
+      - **Métodos por entidad:**
+        - Tabla normal: `fetch{Clase}s()`, `fetch{Clase}ById()`, `create{Clase}()`, `update{Clase}()`, `delete{Clase}()`
+        - JOIN_ENRICHED: Métodos adicionales con composite key (`update{Clase}ByCompositeKey()`, `delete{Clase}ByCompositeKey()`)
+    - **Providers con ChangeNotifier:**
+      - Estado: `List<Model> _items`, `bool _isLoading`, `String? _error`
+      - Getters: `items`, `isLoading`, `error`
+      - Métodos CRUD:
+        - `fetchAll()` - Carga inicial desde API
+        - `create(item)` - Crea nuevo registro
+        - `update(item)` - Actualiza existente (PK simple o composite key)
+        - `delete(id)` - Elimina por ID (o composite key si aplica)
+      - `notifyListeners()` después de cada operación para actualizar UI
+    - **Screens con Material Design 3:**
+      - **ListScreen:**
+        - AppBar con título y botón de agregar
+        - **Navigation Drawer** con lista de todas las entidades:
+          - Íconos: `table_chart` (ENTITY), `link` (JOIN_ENRICHED)
+          - Resalta screen actual con color morado
+          - Navegación automática con `Navigator.pushNamed()`
+        - ListView con Card por cada registro
+        - Botones de acción: Editar, Eliminar (con confirmación)
+        - Estados: Loading spinner, error message, empty state
+        - Búsqueda (pendiente, estructura preparada)
+      - **FormScreen:**
+        - AppBar con título (Crear/Editar)
+        - Form con TextEditingController por cada campo editable
+        - Validación básica (campos required)
+        - Botón guardar con feedback visual
+        - Navegación de regreso automática después de guardar
+        - Manejo de IDs nullable (auto-asignados por backend)
+    - **Clasificación de tablas con relationUtils:**
+      - Usa `classifyTable()` para determinar tipo de tabla
+      - Filtra con `shouldGenerateCRUD()`:
+        - ✅ **ENTITY**: Genera código completo
+        - ✅ **JOIN_ENRICHED**: Genera código con composite key
+        - ❌ **JOIN_PURE**: NO genera código (relación manejada en backend)
+      - Coherencia total con SQL y Spring Boot
+  - `downloadFlutterProject(zipBuffer, projectName)` - Descarga ZIP
+- **Características avanzadas:**
+  - Material Design 3 con esquema de colores deepPurple
+  - Hot reload habilitado (desarrollo Flutter estándar)
+  - Null safety completo (Dart 3.0+)
+  - Arquitectura escalable (fácil agregar BLoC o Riverpod)
+  - README con ejemplos de configuración backend
+- **Conversión de nombres:**
+  - snake_case → PascalCase (clases)
+  - snake_case → camelCase (propiedades)
+- **Ejemplos generados:**
+
+  ```dart
+  // Modelo con null-safety correcto
+  class Usuario {
+    final int? id;           // Nullable: autogenerado
+    final String nombre;     // Required: NOT NULL
+    final String? email;     // Nullable: campo opcional
+
+    Usuario({this.id, required this.nombre, this.email});
+
+    factory Usuario.fromJson(Map<String, dynamic> json) {
+      return Usuario(
+        id: json['id'] as int?,
+        nombre: json['nombre'] as String,
+        email: json['email'] as String?,
+      );
+    }
+
+    Map<String, dynamic> toJson() => {
+      'id': id,
+      'nombre': nombre,
+      'email': email,
+    };
+  }
+
+  // JOIN_ENRICHED con composite key
+  class Carrito {
+    final int usuarioId;     // Required: FK en join table
+    final int productoId;    // Required: FK en join table
+    final int cantidad;      // Required: campo adicional
+
+    Carrito({required this.usuarioId, required this.productoId, required this.cantidad});
+
+    String getCompositeKey() => "${usuarioId}_${productoId}";
+  }
+  ```
+
+- **Listo para ejecutar:**
+  - Instalación: `flutter pub get`
+  - Web: `flutter run -d chrome`
+  - Android/iOS: `flutter run`
+- Soporte: Flutter 3.0+, Dart 3.0+, Android/iOS/Web/Desktop
+- Compatible con Material Design 3, Provider, HTTP package
+
+---
+
+## 🏗️ Arquitectura de Coherencia entre Generadores
+
+### Problema Resuelto
+
+En versiones anteriores, cada generador (SQL, Spring Boot, Flutter) tenía su propia lógica de detección de tablas intermedias, lo que causaba inconsistencias:
+
+- ❌ SQL generaba PK compuesta para una tabla, pero Spring Boot generaba Entity completa
+- ❌ Flutter generaba CRUD para tablas que Spring Boot manejaba con `@ManyToMany`
+- ❌ Código generado no funcionaba correctamente sin modificaciones manuales
+
+### Solución: `relationUtils.ts`
+
+Se centralizó la lógica de clasificación en un módulo compartido que garantiza que **todos los generadores clasifiquen las tablas de la misma forma**.
+
+### Clasificación Unificada
+
+| Tipo de Tabla     | Características                       | SQL                       | Spring Boot                | Flutter                                      |
+| ----------------- | ------------------------------------- | ------------------------- | -------------------------- | -------------------------------------------- |
+| **ENTITY**        | Tabla normal con 0-N FKs              | PK simple `id`            | Entity + CRUD completo     | Models + Providers + Screens                 |
+| **JOIN_PURE**     | Exactamente 2 FKs, sin columnas extra | PK compuesta `(fk1, fk2)` | `@ManyToMany` (sin Entity) | **NO genera código**                         |
+| **JOIN_ENRICHED** | 2+ FKs + columnas adicionales         | PK compuesta o `id`       | Entity + CRUD completo     | Models + Providers + Screens (composite key) |
+
+### Ejemplo Comparativo
+
+**Diagrama ER con 3 tablas:**
+
+```
+Usuario (id, nombre, email)
+Producto (id, nombre, precio)
+Carrito (usuario_id, producto_id, cantidad, fecha)
+```
+
+**Generación SQL:**
+
+```sql
+CREATE TABLE usuario (
+  id SERIAL PRIMARY KEY,
+  nombre VARCHAR(100) NOT NULL,
+  email VARCHAR(100)
+);
+
+CREATE TABLE producto (
+  id SERIAL PRIMARY KEY,
+  nombre VARCHAR(100) NOT NULL,
+  precio DECIMAL(10,2)
+);
+
+-- JOIN_ENRICHED: Tiene campos extra (cantidad, fecha)
+CREATE TABLE carrito (
+  usuario_id INT NOT NULL,
+  producto_id INT NOT NULL,
+  cantidad INT NOT NULL,
+  fecha TIMESTAMP DEFAULT now(),
+  PRIMARY KEY (usuario_id, producto_id),
+  FOREIGN KEY (usuario_id) REFERENCES usuario(id),
+  FOREIGN KEY (producto_id) REFERENCES producto(id)
+);
+```
+
+**Generación Spring Boot:**
+
+```java
+// Usuario.java - ENTITY normal
+@Entity
+public class Usuario {
+    @Id @GeneratedValue(strategy = IDENTITY)
+    private Long id;
+    private String nombre;
+    private String email;
+}
+
+// Carrito.java - JOIN_ENRICHED con campos adicionales
+@Entity
+@Table(name = "carrito")
+public class Carrito {
+    @Id @GeneratedValue(strategy = IDENTITY)
+    private Long id;  // Generado automáticamente
+
+    @ManyToOne
+    @JoinColumn(name = "usuario_id")
+    private Usuario usuario;
+
+    @ManyToOne
+    @JoinColumn(name = "producto_id")
+    private Producto producto;
+
+    private Integer cantidad;  // Campo adicional
+    private LocalDateTime fecha;  // Campo adicional
+}
+
+// CarritoRepository.java - CRUD completo
+public interface CarritoRepository extends JpaRepository<Carrito, Long> {}
+```
+
+**Generación Flutter:**
+
+```dart
+// usuario_model.dart - ENTITY normal
+class Usuario {
+  final int? id;
+  final String nombre;
+  final String? email;
+
+  Usuario({this.id, required this.nombre, this.email});
+}
+
+// carrito_model.dart - JOIN_ENRICHED
+class Carrito {
+  final int usuarioId;    // Required: FK en join table
+  final int productoId;   // Required: FK en join table
+  final int cantidad;     // Required: campo adicional
+  final DateTime? fecha;  // Nullable: campo adicional
+
+  Carrito({
+    required this.usuarioId,
+    required this.productoId,
+    required this.cantidad,
+    this.fecha
+  });
+
+  // Método especial para composite key
+  String getCompositeKey() => "${usuarioId}_${productoId}";
+}
+
+// carrito_provider.dart - Provider con CRUD
+class CarritoProvider extends ChangeNotifier {
+  Future<void> update(Carrito item) async {
+    final compositeKey = item.getCompositeKey();
+    await ApiService.updateCarritoByCompositeKey(compositeKey, item.toJson());
+    // ...
+  }
+}
+
+// carrito_list_screen.dart + carrito_form_screen.dart
+// Screens completas generadas
+```
+
+### Caso Especial: JOIN_PURE
+
+Si la tabla intermedia **solo tuviera las 2 FKs** (sin cantidad ni fecha):
+
+```sql
+-- proyecto_etiqueta: Solo relaciona, sin datos propios
+CREATE TABLE proyecto_etiqueta (
+  proyecto_id INT NOT NULL,
+  etiqueta_id INT NOT NULL,
+  PRIMARY KEY (proyecto_id, etiqueta_id),
+  FOREIGN KEY (proyecto_id) REFERENCES proyecto(id),
+  FOREIGN KEY (etiqueta_id) REFERENCES etiqueta(id)
+);
+```
+
+**Generación Spring Boot:**
+
+```java
+// proyecto_etiqueta NO genera Entity separada
+// En su lugar, genera @ManyToMany en las entidades principales:
+
+@Entity
+public class Proyecto {
+    @Id @GeneratedValue(strategy = IDENTITY)
+    private Long id;
+
+    @ManyToMany
+    @JoinTable(
+        name = "proyecto_etiqueta",
+        joinColumns = @JoinColumn(name = "proyecto_id"),
+        inverseJoinColumns = @JoinColumn(name = "etiqueta_id")
+    )
+    private Set<Etiqueta> etiquetas = new HashSet<>();
+}
+```
+
+**Generación Flutter:**
+
+```dart
+// proyecto_etiqueta NO genera código
+// La relación se maneja automáticamente en el backend con @ManyToMany
+```
+
+### Ventajas de la Arquitectura
+
+1. **Consistencia Total:** Los 3 generadores usan la misma lógica de `relationUtils.ts`
+2. **Código Funcional:** Backend y frontend compatibles sin modificaciones manuales
+3. **Mantenibilidad:** Cambios en la lógica de clasificación se hacen en un solo lugar
+4. **Escalabilidad:** Fácil agregar nuevos tipos de tablas (ej: auditoría, versionado)
+5. **Testing:** Lógica centralizada es más fácil de probar
+
+### Reglas de Detección
+
+```typescript
+// relationUtils.ts - Lógica compartida
+
+// JOIN_PURE: Solo 2 FKs
+if (
+  foreignKeys.length === 2 &&
+  (nonForeignFields.length === 0 || hasOnlyTimestamps)
+) {
+  return { kind: "JOIN_PURE" };
+}
+
+// JOIN_ENRICHED: 2+ FKs con datos adicionales
+if (
+  foreignKeys.length >= 2 &&
+  nonForeignFields.length > 0 &&
+  !hasOnlyTimestamps
+) {
+  return { kind: "JOIN_ENRICHED" };
+}
+
+// ENTITY: Tabla normal
+return { kind: "ENTITY" };
+```
+
+**Timestamps ignorados:** `created_at`, `updated_at`, `timestamp` NO cuentan como campos adicionales significativos.
 
 ---
 
 ### 🌐 Configuración y Punto de Entrada del Frontend
 
 **`packages/web/src/`**
-
-**`api.ts`**
-
-> Cliente Axios configurado para peticiones HTTP al backend
-
-- BaseURL: `http://localhost:3001`
-- Exporta instancia `api` lista para usar en todo el frontend
 
 **`api.ts`**
 
@@ -724,7 +1350,8 @@ _Legacy (Compatibilidad):_
   - **HTTP:** Axios 1.7
   - **WebSocket:** Socket.IO Client 4.8
   - **Modales:** SweetAlert2 11.14
-- **Dev dependencies:** TypeScript, Vite, plugin React
+  - **Archivos:** adm-zip 0.5.10 (generación de proyectos Spring Boot)
+- **Dev dependencies:** TypeScript, Vite, plugin React, @types/node
 
 **`tsconfig.json`**
 

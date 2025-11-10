@@ -8,6 +8,8 @@ interface SidebarProps {
   selectedNode: string | null;
   onAddNode: () => void;
   onExportSQL: () => void;
+  onExportSpringBoot: () => void;
+  onExportFlutter: () => void;
   onDeleteNode?: (nodeId: string) => void;
 }
 
@@ -17,6 +19,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   selectedNode, 
   onAddNode, 
   onExportSQL,
+  onExportSpringBoot,
+  onExportFlutter,
   onDeleteNode
 }) => {
   const tableNodes = nodes.filter(n => n.type === 'table');
@@ -110,6 +114,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             fontWeight: "600",
             cursor: "pointer",
             fontSize: "13px",
+            marginBottom: 8,
             transition: "all 0.1s"
           }}
           onMouseEnter={(e) => {
@@ -122,6 +127,63 @@ export const Sidebar: React.FC<SidebarProps> = ({
           }}
         >
           💾 Exportar SQL
+        </button>
+
+        <button 
+          onClick={onExportSpringBoot}
+          style={{
+            width: "100%",
+            padding: "10px",
+            background: "#2c2c2c",
+            border: "1px solid #444",
+            borderRadius: 6,
+            color: "#aaa",
+            fontWeight: "600",
+            cursor: "pointer",
+            fontSize: "13px",
+            marginBottom: 8,
+            transition: "all 0.1s"
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#6aaf50";
+            e.currentTarget.style.color = "#fff";
+            e.currentTarget.style.borderColor = "#6aaf50";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "#2c2c2c";
+            e.currentTarget.style.color = "#aaa";
+            e.currentTarget.style.borderColor = "#444";
+          }}
+        >
+          ☕ Exportar Spring Boot
+        </button>
+
+        <button 
+          onClick={onExportFlutter}
+          style={{
+            width: "100%",
+            padding: "10px",
+            background: "#2c2c2c",
+            border: "1px solid #444",
+            borderRadius: 6,
+            color: "#aaa",
+            fontWeight: "600",
+            cursor: "pointer",
+            fontSize: "13px",
+            transition: "all 0.1s"
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = "#42A5F5";
+            e.currentTarget.style.color = "#fff";
+            e.currentTarget.style.borderColor = "#42A5F5";
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = "#2c2c2c";
+            e.currentTarget.style.color = "#aaa";
+            e.currentTarget.style.borderColor = "#444";
+          }}
+        >
+          📱 Exportar Flutter
         </button>
       </div>
 

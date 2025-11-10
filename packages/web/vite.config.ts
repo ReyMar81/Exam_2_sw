@@ -14,4 +14,15 @@ export default defineConfig({
       "@shared": resolve(__dirname, "../shared"),
     },
   },
+  define: {
+    'process.env': {},
+    'global': {},
+  },
+  optimizeDeps: {
+    esbuildOptions: {
+      define: {
+        global: 'globalThis'
+      }
+    }
+  }
 });

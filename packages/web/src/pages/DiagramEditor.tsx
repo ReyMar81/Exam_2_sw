@@ -21,8 +21,10 @@ import TableNode from "../components/TableNode";
 import { Sidebar } from "../components/Sidebar";
 import PropertiesPanel from "../components/PropertiesPanel";
 import { generateSQL, downloadSQL } from "../utils/sqlGenerator";
-import { getEdgeStyle } from "../utils/relationStyles";
+import { generateSpringBootProject, downloadSpringBootProject } from "../utils/springBootGenerator";
+import { generateFlutterProject, downloadFlutterProject } from "../utils/flutterGenerator";
 import { determinePKFK, createFKField } from "../utils/relationHandler";
+import { getEdgeStyle } from "../utils/relationStyles";
 
 // Throttle helper (sin necesidad de lodash)
 function throttle<T extends (...args: any[]) => any>(func: T, delay: number): T {
@@ -1225,6 +1227,32 @@ export default function DiagramEditor() {
             const sql = generateSQL(nodes, edges);
             downloadSQL(sql, `${project.name}_${Date.now()}.sql`);
             alert("✅ SQL exportado correctamente!");
+          }}
+          onExportSpringBoot={async () => {
+            try {
+              const zipBuffer = await generateSpringBootProject(
+                { nodes, edges },
+                project.name
+              );
+              downloadSpringBootProject(zipBuffer, project.name);
+              alert("✅ Proyecto Spring Boot generado correctamente!");
+            } catch (error) {
+              console.error("Error generando Spring Boot:", error);
+              alert("❌ Error al generar proyecto Spring Boot");
+            }
+          }}
+          onExportFlutter={async () => {
+            try {
+              const zipBuffer = await generateFlutterProject(
+                { nodes, edges },
+                project.name
+              );
+              downloadFlutterProject(zipBuffer, project.name);
+              alert("✅ Proyecto Flutter generado correctamente!");
+            } catch (error) {
+              console.error("Error generando Flutter:", error);
+              alert("❌ Error al generar proyecto Flutter");
+            }
           }}
           onDeleteNode={handleDeleteNode}
         />
