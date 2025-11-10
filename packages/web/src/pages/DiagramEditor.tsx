@@ -25,6 +25,8 @@ import { generateSpringBootProject, downloadSpringBootProject } from "../utils/s
 import { generateFlutterProject, downloadFlutterProject } from "../utils/flutterGenerator";
 import { determinePKFK, createFKField } from "../utils/relationHandler";
 import { getEdgeStyle } from "../utils/relationStyles";
+// 🧠 AI Integration
+import { AIPromptBar } from "../components/AIPromptBar";
 
 // Throttle helper (sin necesidad de lodash)
 function throttle<T extends (...args: any[]) => any>(func: T, delay: number): T {
@@ -1042,6 +1044,425 @@ export default function DiagramEditor() {
     [userRole, isGuest, project, setEdges, socket]
   );
 
+  // 🧠 AI Integration - Apply actions received from AI
+  const applyAIActions = useCallback(
+    async (actions: any[]) => {
+      console.log("🧠 [Editor] Applying AI actions:", actions);
+
+      if (!actions || !Array.isArray(actions)) {
+        console.warn("⚠️ [AI] No valid actions to apply");
+        return;
+      }
+
+      // 🧩 Guardar temporalmente las acciones AddField para ejecutarlas al final
+      const deferredAddFields: any[] = [];
+      const deferredRenames: any[] = [];
+      
+      // Crear una referencia a los nodos actualizados durante el proceso
+      let updatedNodes = [...nodes];
+
+      // 🔹 Primera pasada: ejecutar todo excepto AddField y RenameTable
+      for (const action of actions) {
+        // Diferir AddField y RenameTable para el final
+        if (action.type === "AddField") {
+          deferredAddFields.push(action);
+          continue;
+        }
+        
+        if (action.type === "RenameTable") {
+          deferredRenames.push(action);
+          continue;
+        }
+
+        try {
+          switch (action.type) {
+            case "CreateTable": {
+              const nodeId = `node-${Date.now()}-${Math.random()}`;
+              const newNode: Node = {
+                id: nodeId,
+                type: "table",
+                position: {
+                  x: Math.random() * 400 + 100,
+                  y: Math.random() * 300 + 100,
+                },
+                data: {
+                  name: action.name,
+                  label: action.name,
+                  fields: action.fields.map((f: any, idx: number) => ({
+                    id: Date.now() + idx,
+                    name: f.name,
+                    type: f.type,
+                    isPrimary: f.isPrimary || false,
+                    isForeign: f.isForeign || false,
+                    nullable: f.nullable !== false, // Default true
+                  })),
+                },
+              };
+
+              // Actualizar estado local y referencia
+              updatedNodes = [...updatedNodes, newNode];
+              setNodes((nds: Node[]) => [...nds, newNode]);
+
+              // Sincronizar con Socket.IO
+              socket.emit("diagram-change", {
+                projectId: project.id,
+                action: "ADD_NODE",
+                payload: newNode,
+              });
+
+              console.log(`✅ [AI] Created table: ${action.name}`);
+              break;
+            }
+
+            case "CreateRelation": {
+              // Buscar nodos source y target por nombre en updatedNodes
+              const sourceNode = updatedNodes.find(
+                (n) => n.data.name === action.fromTable || n.data.label === action.fromTable
+              );
+              const targetNode = updatedNodes.find(
+                (n) => n.data.name === action.toTable || n.data.label === action.toTable
+              );
+
+              if (!sourceNode || !targetNode) {
+                console.warn(
+                  `⚠️ [AI] Relation skipped: table not found (${action.fromTable} → ${action.toTable})`
+                );
+                break;
+              }
+
+              // Mapear cardinalidad de IA a tipo de relación del sistema
+              let relationType = "1-N";
+              if (action.cardinality === "ONE_TO_ONE") relationType = "1-1";
+              if (action.cardinality === "ONE_TO_MANY") relationType = "1-N";
+              if (action.cardinality === "MANY_TO_MANY") relationType = "N-N";
+
+              console.log(
+                `🔗 [AI] Creating ${relationType} relation: ${action.fromTable} → ${action.toTable}`
+              );
+
+              // Para N-N, crear tabla intermedia automáticamente
+              if (relationType === "N-N") {
+                const sourcePK = sourceNode.data.fields.find((f: any) => f.isPrimary);
+                const targetPK = targetNode.data.fields.find((f: any) => f.isPrimary);
+                const sourcePKName = sourcePK?.name || "id";
+                const targetPKName = targetPK?.name || "id";
+
+                const joinTableId = `join-${Date.now()}`;
+                const joinTableName = action.through || `${action.fromTable}_${action.toTable}`;
+                const joinTableNode: Node = {
+                  id: joinTableId,
+                  type: "table",
+                  position: {
+                    x: (sourceNode.position.x + targetNode.position.x) / 2,
+                    y: (sourceNode.position.y + targetNode.position.y) / 2 + 80,
+                  },
+                  data: {
+                    name: joinTableName,
+                    label: joinTableName,
+                    fields: [
+                      {
+                        id: Date.now() + 1,
+                        name: `${action.fromTable}_${sourcePKName}`,
+                        type: sourcePK?.type || "INT",
+                        isForeign: true,
+                        nullable: false,
+                        references: action.fromTable,
+                        referencesField: sourcePKName,
+                      },
+                      {
+                        id: Date.now() + 2,
+                        name: `${action.toTable}_${targetPKName}`,
+                        type: targetPK?.type || "INT",
+                        isForeign: true,
+                        nullable: false,
+                        references: action.toTable,
+                        referencesField: targetPKName,
+                      },
+                    ],
+                  },
+                };
+
+                // Crear edges
+                const edgeStyle1 = getEdgeStyle("1-N");
+                const edgeStyle2 = getEdgeStyle("1-N");
+
+                const edge1: Edge = {
+                  id: `edge-${Date.now()}-1`,
+                  source: sourceNode.id,
+                  target: joinTableId,
+                  label: "1-N",
+                  animated: edgeStyle1.animated,
+                  style: {
+                    stroke: edgeStyle1.stroke,
+                    strokeWidth: edgeStyle1.strokeWidth,
+                    strokeDasharray: edgeStyle1.strokeDasharray,
+                  },
+                  type: edgeStyle1.type,
+                  labelStyle: { fill: edgeStyle1.stroke, fontWeight: 700, fontSize: 13 },
+                  labelBgStyle: edgeStyle1.labelBgStyle,
+                  markerEnd: { type: "arrowclosed", color: edgeStyle1.stroke },
+                  data: {
+                    sourceField: sourcePKName,
+                    targetField: `${action.fromTable}_${sourcePKName}`,
+                    relationType: "1-N",
+                  },
+                };
+
+                const edge2: Edge = {
+                  id: `edge-${Date.now()}-2`,
+                  source: targetNode.id,
+                  target: joinTableId,
+                  label: "1-N",
+                  animated: edgeStyle2.animated,
+                  style: {
+                    stroke: edgeStyle2.stroke,
+                    strokeWidth: edgeStyle2.strokeWidth,
+                    strokeDasharray: edgeStyle2.strokeDasharray,
+                  },
+                  type: edgeStyle2.type,
+                  labelStyle: { fill: edgeStyle2.stroke, fontWeight: 700, fontSize: 13 },
+                  labelBgStyle: edgeStyle2.labelBgStyle,
+                  markerEnd: { type: "arrowclosed", color: edgeStyle2.stroke },
+                  data: {
+                    sourceField: targetPKName,
+                    targetField: `${action.toTable}_${targetPKName}`,
+                    relationType: "1-N",
+                  },
+                };
+
+                // Actualizar estado local y referencia
+                updatedNodes = [...updatedNodes, joinTableNode];
+                setNodes((nds: Node[]) => [...nds, joinTableNode]);
+                setEdges((eds: Edge[]) => [...eds, edge1, edge2]);
+
+                // Sincronizar
+                socket.emit("diagram-change", {
+                  projectId: project.id,
+                  action: "ADD_NODE",
+                  payload: joinTableNode,
+                });
+
+                setTimeout(() => {
+                  socket.emit("diagram-change", {
+                    projectId: project.id,
+                    action: "ADD_EDGE",
+                    payload: edge1,
+                  });
+                }, 50);
+
+                setTimeout(() => {
+                  socket.emit("diagram-change", {
+                    projectId: project.id,
+                    action: "ADD_EDGE",
+                    payload: edge2,
+                  });
+                }, 100);
+              } else {
+                // Para 1-1 y 1-N, crear FK y edge
+                const { pkTable, fkTable } = determinePKFK(sourceNode, targetNode);
+                const fkField = createFKField(fkTable, pkTable, relationType);
+                const pkField = pkTable.data.fields.find((f: any) => f.isPrimary);
+
+                if (fkField && pkField) {
+                  // Actualizar nodo con FK en referencia local
+                  updatedNodes = updatedNodes.map((n: Node) =>
+                    n.id === fkTable.id
+                      ? { ...n, data: { ...n.data, fields: fkTable.data.fields } }
+                      : n
+                  );
+                  
+                  setNodes((nds: Node[]) =>
+                    nds.map((n: Node) =>
+                      n.id === fkTable.id
+                        ? { ...n, data: { ...n.data, fields: fkTable.data.fields } }
+                        : n
+                    )
+                  );
+
+                  // Sincronizar nodo actualizado
+                  socket.emit("diagram-change", {
+                    projectId: project.id,
+                    action: "UPDATE_NODE",
+                    payload: {
+                      id: fkTable.id,
+                      data: fkTable.data,
+                    },
+                  });
+
+                  // Crear edge
+                  const edgeStyle = getEdgeStyle(relationType);
+                  const newEdge: Edge = {
+                    id: `edge-${Date.now()}`,
+                    source: pkTable.id,
+                    target: fkTable.id,
+                    label: relationType === "1-1" ? "1‒1" : "1‒N",
+                    animated: edgeStyle.animated,
+                    style: {
+                      stroke: edgeStyle.stroke,
+                      strokeWidth: edgeStyle.strokeWidth,
+                      strokeDasharray: edgeStyle.strokeDasharray,
+                    },
+                    type: edgeStyle.type,
+                    labelStyle: {
+                      fill: edgeStyle.stroke,
+                      fontWeight: 700,
+                      fontSize: 13,
+                    },
+                    labelBgStyle: edgeStyle.labelBgStyle,
+                    markerEnd: {
+                      type: "arrowclosed",
+                      color: edgeStyle.stroke,
+                    },
+                    data: {
+                      sourceField: pkField?.name,
+                      targetField: fkField?.name,
+                      relationType,
+                    },
+                  };
+
+                  setEdges((eds: Edge[]) => [...eds, newEdge]);
+
+                  socket.emit("diagram-change", {
+                    projectId: project.id,
+                    action: "ADD_EDGE",
+                    payload: newEdge,
+                  });
+                }
+              }
+
+              console.log(`✅ [AI] Created relation: ${action.fromTable} → ${action.toTable}`);
+              break;
+            }
+
+            case "DeleteTable": {
+              const nodeToDelete = updatedNodes.find(
+                (n) => n.data.name === action.name || n.data.label === action.name
+              );
+
+              if (nodeToDelete) {
+                updatedNodes = updatedNodes.filter((n) => n.id !== nodeToDelete.id);
+                handleDeleteNode(nodeToDelete.id);
+                console.log(`✅ [AI] Deleted table: ${action.name}`);
+              }
+              break;
+            }
+
+            default:
+              console.warn("⚠️ [AI] Unknown action type:", action.type);
+          }
+
+          // Delay pequeño entre acciones para evitar condiciones de carrera
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        } catch (error) {
+          console.error("❌ [AI] Error applying action:", action, error);
+        }
+      }
+
+      // 🔹 Segunda pasada: aplicar RenameTable (si hay)
+      for (const renameAction of deferredRenames) {
+        try {
+          const nodeToRename = updatedNodes.find(
+            (n) => n.data.name === renameAction.oldName || n.data.label === renameAction.oldName
+          );
+
+          if (nodeToRename) {
+            const updatedData = {
+              name: renameAction.newName,
+              label: renameAction.newName,
+            };
+
+            // Actualizar referencia local
+            updatedNodes = updatedNodes.map((n: Node) =>
+              n.id === nodeToRename.id
+                ? { ...n, data: { ...n.data, ...updatedData } }
+                : n
+            );
+
+            // Actualizar estado y sincronizar
+            handleNodeUpdate(nodeToRename.id, updatedData);
+
+            console.log(
+              `✅ [AI] Renamed table: ${renameAction.oldName} → ${renameAction.newName}`
+            );
+          } else {
+            console.warn(
+              `⚠️ [AI] Table not found for RenameTable: ${renameAction.oldName}`
+            );
+          }
+
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        } catch (error) {
+          console.error("❌ [AI] Error applying RenameTable:", error);
+        }
+      }
+
+      // 🔹 Tercera pasada: aplicar AddField una vez que todas las tablas existen
+      for (const fieldAction of deferredAddFields) {
+        try {
+          // Soportar ambos formatos: tableName y targetTable
+          const tableName = fieldAction.tableName || fieldAction.targetTable;
+          const fields = fieldAction.fields || (fieldAction.field ? [fieldAction.field] : []);
+
+          if (!tableName || fields.length === 0) {
+            console.warn("⚠️ [AI] Invalid AddField action:", fieldAction);
+            continue;
+          }
+
+          const targetNode = updatedNodes.find(
+            (n) => n.data.name === tableName || n.data.label === tableName
+          );
+
+          if (!targetNode) {
+            console.warn(
+              `⚠️ [AI] Table not found for AddField: ${tableName}`
+            );
+            continue;
+          }
+
+          // Agregar todos los campos especificados
+          const newFields = fields.map((f: any) => ({
+            id: Date.now() + Math.random(),
+            name: f.name,
+            type: f.type,
+            isPrimary: f.isPrimary || false,
+            nullable: f.nullable !== false,
+          }));
+
+          const updatedFields = [...targetNode.data.fields, ...newFields];
+          
+          // Actualizar referencia local
+          updatedNodes = updatedNodes.map((n: Node) =>
+            n.id === targetNode.id
+              ? { ...n, data: { ...n.data, fields: updatedFields } }
+              : n
+          );
+
+          // Actualizar estado y sincronizar
+          handleNodeUpdate(targetNode.id, { fields: updatedFields });
+
+          console.log(
+            `✅ [AI] Added ${newFields.length} deferred field(s) to ${tableName}: ${newFields.map((f: any) => f.name).join(", ")}`
+          );
+
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        } catch (error) {
+          console.error("❌ [AI] Error applying deferred AddField:", error);
+        }
+      }
+
+      alert(`✅ ${actions.length} acción(es) de IA aplicada(s) correctamente!`);
+    },
+    [
+      nodes,
+      project,
+      setNodes,
+      setEdges,
+      socket,
+      handleDeleteNode,
+      handleNodeUpdate,
+    ]
+  );
+
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", position: "relative" }}>
       {/* 📋 TÍTULO DEL PROYECTO EN EL HEADER */}
@@ -1303,6 +1724,15 @@ export default function DiagramEditor() {
           project={project}
         />
       </div>
+
+      {/* 🧠 AI Integration - Prompt Bar (solo para OWNER/EDITOR) */}
+      {!isViewer && !isGuest && (
+        <AIPromptBar
+          projectId={project.id}
+          userId={user.id}
+          onActionsReceived={applyAIActions}
+        />
+      )}
     </div>
   );
 }

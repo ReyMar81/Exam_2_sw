@@ -14,6 +14,8 @@ import usersRouter from "./routes/users.js";
 import projectsRouter from "./routes/projects.js";
 import invitationsRouter from "./routes/invitations.js";
 import diagramsRouter from "./routes/diagrams.js";
+// 🧠 AI Integration
+import aiRouter from "./routes/ai.js";
 
 const prisma = new PrismaClient();
 const app = express();
@@ -61,6 +63,8 @@ app.use("/api/users", usersRouter);
 app.use("/api/projects", projectsRouter);
 app.use("/api/invitations", invitationsRouter);
 app.use("/api/diagrams", diagramsRouter);
+// 🧠 AI Integration
+app.use("/api/ai", aiRouter);
 
 // Servir archivos estáticos del frontend (SPA)
 const webDistPath = path.resolve("/app/packages/web/dist");
