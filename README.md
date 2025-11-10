@@ -18,7 +18,7 @@ Herramienta integral para acelerar el desarrollo de sistemas de gestión mediant
 - Generación automática de scripts SQL optimizados
 - Generación de backend Spring Boot completo (Entity, Repository, Service, Controller, DTOs)
 - Generación de frontend Flutter funcional con CRUD básico
-- Diseño asistido por IA (prompts de texto/voz, reconocimiento de imágenes)
+- **Diseño asistido por IA:** Creación por prompts en lenguaje natural con GPT-4o-mini (voz e imágenes en desarrollo)
 
 ### Casos de Uso
 
@@ -32,7 +32,7 @@ Herramienta integral para acelerar el desarrollo de sistemas de gestión mediant
 - **Colaboración Real:** Múltiples usuarios editando simultáneamente con roles (OWNER/EDITOR/VIEWER)
 - **Sincronización Instantánea:** Cambios propagados en < 100ms vía WebSocket
 - **Generación Inteligente:** Del diagrama a código funcional listo para producción
-- **IA Integrada:** Creación por voz, prompts en lenguaje natural, OCR de imágenes
+- **IA Integrada:** ✅ Prompts de texto en lenguaje natural | ⏳ Reconocimiento de voz e imágenes (en desarrollo)
 - **Ligero:** Optimizado para AWS t2.micro (1GB RAM, 1 vCPU)
 
 ---
@@ -165,14 +165,46 @@ Herramienta integral para acelerar el desarrollo de sistemas de gestión mediant
     - Web: `flutter run -d chrome`
     - Android/iOS: `flutter run`
   - **Compatible con:** Flutter 3.0+, Dart 3.0+, Material Design 3
+- [x] **Diseño Asistido por IA (Parcial)**
+  - **Generación desde prompts de texto en lenguaje natural** ✅ IMPLEMENTADO
+    - Integración con OpenAI GPT-4o-mini
+    - Servicio backend (`aiService.ts`) con system prompt optimizado (180+ líneas)
+    - Endpoint REST: `POST /api/ai/parse-intent` + health check
+    - Componente frontend: `AIPromptBar` con UI glassmorphism morado
+    - **Acciones soportadas:**
+      - `CreateTable` - Crear tablas con campos inferidos automáticamente
+      - `CreateRelation` - Relaciones 1-1, 1-N, N-N (con tabla intermedia automática)
+      - `AddField` - Agregar campos a tablas existentes (con manejo diferido)
+      - `RenameTable` - Renombrar tablas intermedias personalizadas
+      - `DeleteTable` - Eliminar tablas completas
+      - `DeleteRelation` - Eliminar relaciones específicas
+    - **Características:**
+      - Inferencia inteligente de tipos SQL desde texto natural
+      - Detección automática de cardinalidades (1-1, 1-N, N-N)
+      - Manejo especial de relaciones muchos-a-muchos:
+        - Creación automática de tabla intermedia
+        - Soporte para campos adicionales en tabla intermedia
+        - Renombrado personalizado de tablas intermedias
+      - Ejecución diferida de `AddField` para evitar pérdida de atributos
+      - Sincronización en tiempo real vía Socket.IO
+      - Control de acceso por rol (solo OWNER/EDITOR pueden usar IA)
+      - Validación de respuestas JSON con manejo de errores
+      - Rate limit y gestión de API key inválida
+    - **System Prompt:** 180+ líneas con ejemplos detallados y reglas de inferencia
+    - **Variables de entorno:** `OPENAI_API_KEY` requerida
+    - **Testing:** Guía completa en `TESTING_GUIDE.md` (600+ líneas)
+  - **Ejemplos de uso:**
+    - "Crea una tabla cliente con id, nombre, email, teléfono"
+    - "Relación 1 a muchos entre cliente y pedido"
+    - "Crea una relación muchos a muchos entre persona y perfil con campos fecha_creacion y activo"
+    - "Agrega campo telefono VARCHAR(20) a tabla usuario"
 
 ### ⏳ Pendiente de Implementación
 
-- [ ] **Diseño Asistido por IA**
-  - Generación de diagramas desde prompt de texto
-  - Reconocimiento de voz para creación de tablas
-  - OCR/Visión por computadora para replicar diagramas desde imágenes
-  - Sugerencias inteligentes de relaciones
+- [ ] **Diseño Asistido por IA (Restante)**
+  - Reconocimiento de voz para creación de tablas (Web Speech API)
+  - OCR/Visión por computadora para replicar diagramas desde imágenes (GPT-4 Vision)
+  - Sugerencias inteligentes de relaciones basadas en contexto
   - Auto-completado de campos comunes (createdAt, updatedAt, etc.)
 
 ### 🎛️ Requisitos Técnicos
@@ -196,6 +228,7 @@ EXAM_2_SW/
 │   │   │
 │   │   └── src/
 │   │        ├── routes/             # API REST endpoints
+│   │        │   ├── ai.ts           # 🧠 Endpoints de IA (parse-intent, health)
 │   │        │   ├── changes.ts      # Auditoría de cambios
 │   │        │   ├── diagrams.ts     # CRUD de diagramas
 │   │        │   ├── invitations.ts  # Sistema de invitaciones
@@ -203,6 +236,9 @@ EXAM_2_SW/
 │   │        │   ├── projects.ts     # Gestión de proyectos
 │   │        │   ├── sessions.ts     # Control de presencia
 │   │        │   └── users.ts        # Autenticación
+│   │        │
+│   │        ├── services/
+│   │        │   └── aiService.ts    # 🧠 Integración OpenAI GPT-4o-mini
 │   │        │
 │   │        ├── utils/
 │   │        │   └── ensureUserExists.ts  # Helper de usuarios
@@ -216,6 +252,7 @@ EXAM_2_SW/
 │   └── web/                         # Frontend React + Vite
 │       └── src/
 │           ├── components/          # Componentes React
+│           │   ├── AIPromptBar.tsx  # 🧠 Barra de prompts IA (glassmorphism)
 │           │   ├── ErrorBoundary.tsx # Manejo de errores
 │           │   ├── PropertiesPanel.tsx # Editor de propiedades
 │           │   ├── Sidebar.tsx      # Panel lateral
@@ -295,6 +332,34 @@ EXAM_2_SW/
 - `POST /api/changes/add` - Guardar cambio en el historial (acción + payload)
 - `GET /api/changes/:diagramId` - Obtener últimos 50 cambios de un diagrama
 
+**`ai.ts`** 🧠
+
+> Endpoints de integración con IA para generación automática de diagramas
+
+- `POST /api/ai/parse-intent` - Parsear prompt de texto natural y generar acciones JSON
+  - **Request body:** `{ prompt: string }` (máximo 500 caracteres)
+  - **Response:** `{ actions: AIAction[] }` - Array de acciones estructuradas
+  - **Acciones soportadas:** CreateTable, CreateRelation, AddField, RenameTable, DeleteTable, DeleteRelation
+  - **Validaciones:**
+    - Prompt no vacío
+    - Longitud máxima 500 caracteres
+    - JSON válido en respuesta
+    - Schema de acciones correcto
+  - **Manejo de errores:**
+    - 400: Prompt inválido o vacío
+    - 401: API key de OpenAI inválida
+    - 429: Rate limit excedido
+    - 500: Error de parseo o respuesta inválida
+  - **Integración:** OpenAI GPT-4o-mini con system prompt de 180+ líneas
+  - **Características:**
+    - Inferencia automática de tipos SQL
+    - Detección de cardinalidades (1-1, 1-N, N-N)
+    - Manejo especial de relaciones muchos-a-muchos
+    - Validación de estructura JSON estricta
+- `GET /api/ai/health` - Health check del servicio de IA
+  - **Response:** `{ status: "ok", hasApiKey: boolean, keyPreview: string }`
+  - **Uso:** Verificar configuración de `OPENAI_API_KEY` en variables de entorno
+
 **`diagrams.ts`**
 
 > CRUD de diagramas y persistencia de datos visuales
@@ -342,7 +407,73 @@ EXAM_2_SW/
 
 ---
 
-### 🔧 Utilidades del Backend
+### 🔧 Utilidades y Servicios del Backend
+
+**`packages/server/src/services/`**
+
+**`aiService.ts`** 🧠⭐
+
+> Servicio de integración con OpenAI API para procesamiento de lenguaje natural
+
+- **Función principal:** `parseUserIntent(prompt: string): Promise<{ actions: AIAction[] }>`
+  - Envía prompt a GPT-4o-mini con system prompt especializado
+  - Retorna array de acciones estructuradas en JSON
+  - Validación automática de respuestas
+  - Manejo de errores específicos de OpenAI
+- **Configuración:**
+  - Modelo: `gpt-4o-mini` (optimizado costo/rendimiento)
+  - Temperature: `0.3` (balance creatividad/precisión)
+  - Response format: `json_object` (respuestas JSON estrictas)
+  - Timeout implícito: 30s (OpenAI SDK default)
+- **System Prompt (180+ líneas):**
+  - Reglas generales de formato JSON
+  - Definiciones de 6 tipos de acciones (CreateTable, CreateRelation, AddField, etc.)
+  - Reglas de inferencia de tipos SQL desde texto natural
+  - Detección automática de cardinalidades
+  - **Reglas especiales para relaciones N-N:**
+    - No crear tabla intermedia con CreateTable (el sistema lo hace automáticamente)
+    - Devolver CreateRelation con cardinality MANY_TO_MANY
+    - Si hay atributos adicionales, usar AddField con targetTable inferida
+    - Si hay nombre personalizado, usar RenameTable antes de AddField
+  - 8+ ejemplos completos con casos de uso reales
+  - Mapeo de tipos: email→VARCHAR(100), edad→INT, precio→DECIMAL(10,2), etc.
+- **Tipos exportados:**
+  ```typescript
+  type AIAction =
+    | { type: "CreateTable"; name: string; fields: AIField[] }
+    | {
+        type: "CreateRelation";
+        fromTable: string;
+        toTable: string;
+        cardinality: "ONE_TO_ONE" | "ONE_TO_MANY" | "MANY_TO_MANY";
+      }
+    | {
+        type: "AddField";
+        tableName?: string;
+        targetTable?: string;
+        field?: AIField;
+        fields?: AIField[];
+      }
+    | { type: "RenameTable"; oldName: string; newName: string }
+    | { type: "DeleteTable"; name: string }
+    | { type: "DeleteRelation"; fromTable: string; toTable: string };
+  ```
+- **Función auxiliar:** `validateActions(actions: AIAction[]): { valid: boolean; errors: string[] }`
+  - Valida estructura y campos requeridos de cada acción
+  - Detecta tipos de acción desconocidos
+  - Retorna lista de errores descriptivos
+- **Logs detallados:**
+  - Emoji coding: 🧠 [AI], ✅, ❌, ⚠️
+  - Preview de prompts (primeros 100 chars)
+  - Tiempo de respuesta en ms
+  - Conteo de acciones generadas
+- **Manejo de errores:**
+  - `invalid_api_key`: API key incorrecta o faltante
+  - `rate_limit` (429): Límite de requests excedido
+  - Respuestas vacías o JSON inválido
+  - Acciones con schema incorrecto
+- **Variables de entorno requeridas:**
+  - `OPENAI_API_KEY` - API key de OpenAI (obligatoria)
 
 **`packages/server/src/utils/`**
 
@@ -373,7 +504,15 @@ EXAM_2_SW/
 
 - `GET /health` - Health check básico
 - `GET /dbcheck` - Verificar conexión a DB y listar usuarios
-- Monta todas las rutas bajo `/api/*` (sessions, locks, changes, users, projects, invitations, diagrams)
+- Monta todas las rutas bajo `/api/*`:
+  - `/api/sessions` - Control de presencia
+  - `/api/locks` - Bloqueos distribuidos
+  - `/api/changes` - Auditoría de cambios
+  - `/api/users` - Autenticación
+  - `/api/projects` - Gestión de proyectos
+  - `/api/invitations` - Sistema de invitaciones
+  - `/api/diagrams` - CRUD de diagramas
+  - `/api/ai` - 🧠 Endpoints de IA (parse-intent, health)
 - Sirve frontend estático desde `/app/packages/web/dist`
 - Catch-all route para SPA routing (React Router)
 
@@ -410,12 +549,14 @@ _Legacy (Compatibilidad):_
 
 - `PORT=3001` - Puerto del servidor Express
 - `DATABASE_URL` - Conexión a PostgreSQL (host: `db` en Docker, `localhost` en local)
+- `OPENAI_API_KEY` - 🧠 API key de OpenAI para integración de IA (requerida para funcionalidades de IA)
 
 **`packages/server/.env.example`**
 
 > Plantilla de variables de entorno para desarrollo
 
 - Incluye ejemplos para Docker y desarrollo local
+- Template de `OPENAI_API_KEY` con instrucciones de obtención
 
 **`packages/server/package.json`**
 
@@ -427,7 +568,9 @@ _Legacy (Compatibilidad):_
   - `start` - Ejecutar servidor compilado
   - `prisma:generate` - Generar cliente Prisma
   - `prisma:migrate` - Crear migración inicial
-- **Dependencias principales:** Express, Prisma Client, Socket.IO, CORS, Helmet, dotenv
+- **Dependencias principales:**
+  - Express, Prisma Client, Socket.IO, CORS, Helmet, dotenv
+  - **openai** 4.73.0+ - 🧠 SDK oficial de OpenAI para Node.js
 - **Dev dependencies:** TypeScript, ts-node-dev, tipos para Node/Express
 
 **`packages/server/tsconfig.json`**
@@ -490,6 +633,53 @@ _Legacy (Compatibilidad):_
   - Indicador visual de tabla seleccionada
   - Botón de eliminar tabla con confirmación
 - Diseño compacto (280px ancho) con scroll
+
+**`AIPromptBar.tsx`** 🧠⭐
+
+> Barra flotante de prompts IA con diseño glassmorphism en footer del editor
+
+- **Interfaz de usuario:**
+  - Input de texto con placeholder descriptivo y límite de 500 caracteres
+  - Contador de caracteres en tiempo real (ej: "0/500")
+  - Botón "Generar" con gradiente morado (#667eea → #764ba2)
+  - Spinner de loading durante procesamiento
+  - Mensajes de error inline (no alerts) con estilo rojo
+  - Lista de ejemplos de uso como referencia rápida
+  - Diseño glassmorphism con backdrop-filter blur y fondo semi-transparente
+- **Funcionalidad:**
+  - Envía prompt a endpoint `/api/ai/parse-intent` vía POST
+  - Validación local de longitud (máx 500 chars) antes de enviar
+  - Callback `onActionsReceived(actions)` para aplicar acciones en editor
+  - Manejo de estados: normal, loading, error
+  - Limpia input después de éxito
+  - Control de acceso: solo visible para OWNER/EDITOR (no VIEWER/GUEST)
+- **Props:**
+  - `projectId: string` - ID del proyecto actual
+  - `userId: string` - ID del usuario (para logs y auditoría)
+  - `onActionsReceived: (actions: any[]) => void` - Callback para aplicar acciones
+- **Integración con DiagramEditor:**
+  - Renderizado condicional: `{!isViewer && !isGuest && <AIPromptBar />}`
+  - Posicionado en footer con `position: fixed; bottom: 0`
+  - Conectado con función `applyAIActions()` para ejecución de acciones
+  - Sincronización automática vía Socket.IO después de aplicar
+- **Estilos:**
+  - Ancho: 60% de la pantalla (centrado)
+  - Altura fija: ~100px con padding generoso
+  - Border radius: 16px con sombra elegante
+  - Gradiente de fondo: rgba(17, 25, 40, 0.85)
+  - Efectos hover: translateY(-2px) y sombra más pronunciada
+  - Responsive: se adapta a diferentes tamaños de pantalla
+- **Ejemplos integrados:**
+  - "Crea una tabla cliente con id, nombre, email, teléfono"
+  - "Relación 1 a muchos entre cliente y pedido"
+  - "Crea una relación muchos a muchos entre persona y perfil"
+  - "Agrega campo telefono VARCHAR(20) a tabla usuario"
+- **Manejo de errores:**
+  - API key inválida: "Error: Invalid OpenAI API key"
+  - Rate limit: "Rate limit exceeded. Please try again later"
+  - Prompt vacío: "Por favor ingresa un prompt"
+  - Prompt muy largo: "El prompt no puede exceder 500 caracteres"
+  - Error de red: "Error al procesar el prompt"
 
 ---
 
@@ -606,15 +796,55 @@ _Legacy (Compatibilidad):_
 - Creación automática de tablas intermedias para relaciones N-N
 - Validación de permisos por rol (OWNER/EDITOR pueden editar, VIEWER solo ve)
 - Sincronización en tiempo real vía Socket.IO:
-  - Eventos: `ADD_NODE`, `UPDATE_NODE`, `DELETE_NODE`, `MOVE_NODE`, `ADD_EDGE`, `DELETE_EDGE`
+  - Eventos: `ADD_NODE`, `UPDATE_NODE`, `DELETE_NODE`, `MOVE_NODE`, `ADD_EDGE`, `DELETE_EDGE`, `SYNC_EDGES`
   - Broadcast a todos los usuarios del proyecto (excepto emisor)
 - Sistema de presencia: muestra usuarios activos en barra superior
-- Integración con `PropertiesPanel` y `Sidebar`
+- Integración con `PropertiesPanel`, `Sidebar` y `AIPromptBar` 🧠
 - Carga/guardado automático desde/hacia base de datos
 - Soporte para eliminación con clic derecho y tecla Delete
-- Exportación SQL con `sqlGenerator`
+- Exportación SQL, Spring Boot y Flutter con generadores
 - Throttling de movimientos para optimizar red
 - Manejo de reconexión y limpieza de sockets al salir
+- **Integración de IA (Nuevo):**
+  - Componente `AIPromptBar` renderizado en footer (solo OWNER/EDITOR)
+  - Función `applyAIActions(actions: any[])` para ejecutar acciones de IA:
+    - **Estrategia de ejecución en 3 fases:**
+      1. **Primera pasada:** Ejecuta CreateTable, CreateRelation, DeleteTable
+      2. **Segunda pasada:** Ejecuta RenameTable (para personalizar nombres de tablas intermedias)
+      3. **Tercera pasada:** Ejecuta AddField de forma diferida (después de que tablas existan)
+    - **Ventajas del manejo diferido:**
+      - Evita pérdida de atributos en tablas intermedias N-N
+      - Garantiza que tablas existan antes de agregar campos
+      - Soporta tanto formato `tableName` como `targetTable`
+      - Soporta arrays múltiples de campos (`fields[]`)
+    - **Referencia local de nodos actualizada (`updatedNodes`):**
+      - Mantiene sincronía entre estado React y operaciones de IA
+      - Permite búsqueda de tablas generadas dinámicamente
+      - Se actualiza después de cada CreateTable y CreateRelation
+    - **Sincronización Socket.IO automática:**
+      - Emite `diagram-change` después de cada acción
+      - Delays entre acciones (50-150ms) para evitar race conditions
+      - Broadcast a todos los colaboradores en tiempo real
+    - **Acciones implementadas:**
+      - `CreateTable`: Crea nodo con campos, posición aleatoria
+      - `CreateRelation`:
+        - 1-1 y 1-N: Crea FK en tabla correcta + edge visual
+        - N-N: Crea tabla intermedia automática + 2 edges (hacia cada tabla)
+      - `AddField`: Agrega campos a tabla específica (soporta múltiples)
+      - `RenameTable`: Cambia nombre de tabla (útil para personalizar joins)
+      - `DeleteTable`: Elimina tabla + edges relacionados
+    - **Manejo de relaciones N-N especial:**
+      - Detecta campos PK de ambas tablas (`sourcePK`, `targetPK`)
+      - Crea tabla intermedia con nombre inferido: `{tabla1}_{tabla2}`
+      - Genera 2 FKs con nombres compuestos: `{tabla}_{pk_name}`
+      - Posiciona tabla intermedia entre las tablas relacionadas
+      - Crea 2 edges tipo 1-N desde cada tabla original
+      - Almacena metadata en `edge.data` (sourceField, targetField, relationType)
+    - **Validación y logs detallados:**
+      - Logs con emoji coding: 🧠 [AI], ✅, ⚠️, ❌
+      - Advertencias si tabla no encontrada para AddField
+      - Alert final con conteo de acciones aplicadas
+      - Console tracking de cada acción ejecutada
 
 ---
 

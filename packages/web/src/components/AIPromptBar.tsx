@@ -1,5 +1,5 @@
-// 🧠 AI Integration - Prompt Bar Component
-import React, { useState } from "react";
+// 🧠 AI Integration - Prompt Bar Component (Compact ChatGPT-style)
+import React, { useState, useEffect, useRef } from "react";
 import { api } from "../api";
 
 interface AIPromptBarProps {
@@ -7,6 +7,14 @@ interface AIPromptBarProps {
   userId: string;
   onActionsReceived: (actions: any[]) => void;
   disabled?: boolean;
+}
+
+// Declaración de tipos para Web Speech API
+declare global {
+  interface Window {
+    SpeechRecognition: any;
+    webkitSpeechRecognition: any;
+  }
 }
 
 export function AIPromptBar({
@@ -18,6 +26,41 @@ export function AIPromptBar({
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const recognitionRef = useRef<any>(null);
+
+  // Verificar soporte de Web Speech API
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (SpeechRecognition) {
+      setSpeechSupported(true);
+      const recognition = new SpeechRecognition();
+      recognition.lang = "es-ES";
+      recognition.continuous = false;
+      recognition.interimResults = false;
+
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        console.log("🎤 [Voice] Transcribed:", transcript);
+        setPrompt(transcript);
+        setIsRecording(false);
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error("❌ [Voice] Error:", event.error);
+        setError(`Error de reconocimiento de voz: ${event.error}`);
+        setIsRecording(false);
+        setTimeout(() => setError(null), 3000);
+      };
+
+      recognition.onend = () => {
+        setIsRecording(false);
+      };
+
+      recognitionRef.current = recognition;
+    }
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -28,6 +71,7 @@ export function AIPromptBar({
 
     if (trimmedPrompt.length > 500) {
       setError("Prompt demasiado largo (máximo 500 caracteres)");
+      setTimeout(() => setError(null), 3000);
       return;
     }
 
@@ -53,6 +97,7 @@ export function AIPromptBar({
 
       if (actions.length === 0) {
         setError("La IA no generó acciones válidas. Intenta reformular el prompt.");
+        setTimeout(() => setError(null), 5000);
         return;
       }
 
@@ -86,175 +131,231 @@ export function AIPromptBar({
     }
   };
 
+  const handleMicClick = () => {
+    if (!speechSupported) {
+      setError("Tu navegador no soporta reconocimiento de voz. Usa Chrome o Edge.");
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    if (isRecording) {
+      // Detener grabación
+      recognitionRef.current?.stop();
+      setIsRecording(false);
+    } else {
+      // Iniciar grabación
+      setError(null);
+      setIsRecording(true);
+      try {
+        recognitionRef.current?.start();
+        console.log("🎤 [Voice] Recording started...");
+      } catch (err) {
+        console.error("❌ [Voice] Failed to start:", err);
+        setIsRecording(false);
+      }
+    }
+  };
+
   return (
-    <div
-      style={{
-        position: "absolute",
-        bottom: 20,
-        left: "50%",
-        transform: "translateX(-50%)",
-        width: "min(700px, 90%)",
-        background: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-        borderRadius: 16,
-        padding: "16px 20px",
-        boxShadow: "0 8px 32px rgba(0,0,0,0.4)",
-        zIndex: 1000,
-        backdropFilter: "blur(10px)",
-      }}
-    >
-      {/* Header con icono */}
+    <>
+      {/* Barra compacta tipo ChatGPT */}
       <div
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 12,
-          color: "#fff",
+          position: "fixed",
+          bottom: 16,
+          left: "50%",
+          transform: "translateX(-50%)",
+          width: "min(800px, 92%)",
+          maxWidth: 800,
+          zIndex: 1000,
         }}
       >
-        <span style={{ fontSize: 20 }}>🤖</span>
-        <span style={{ fontWeight: "bold", fontSize: 14 }}>
-          Asistente de IA
-        </span>
-        <span
-          style={{
-            marginLeft: "auto",
-            fontSize: 11,
-            opacity: 0.7,
-            fontStyle: "italic",
-          }}
-        >
-          GPT-4o-mini
-        </span>
-      </div>
+        {/* Mensaje de error discreto encima */}
+        {error && (
+          <div
+            style={{
+              marginBottom: 8,
+              padding: "8px 16px",
+              background: "rgba(220, 38, 38, 0.95)",
+              borderRadius: 8,
+              color: "#fff",
+              fontSize: 13,
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              boxShadow: "0 2px 8px rgba(0,0,0,0.3)",
+            }}
+          >
+            <span>⚠️</span>
+            <span>{error}</span>
+          </div>
+        )}
 
-      {/* Form de input */}
-      <form onSubmit={handleSubmit} style={{ display: "flex", gap: 10 }}>
-        <input
-          type="text"
-          value={prompt}
-          onChange={(e) => setPrompt(e.target.value)}
-          onKeyDown={handleKeyDown}
-          placeholder='Ej: "Crea tabla cliente con id, nombre, email y relación 1 a muchos con pedido"'
-          disabled={loading || disabled}
-          maxLength={500}
-          style={{
-            flex: 1,
-            padding: "12px 16px",
-            border: "none",
-            borderRadius: 10,
-            fontSize: 14,
-            outline: "none",
-            background: "rgba(255,255,255,0.95)",
-            color: "#333",
-            transition: "all 0.2s",
-          }}
-        />
-        <button
-          type="submit"
-          disabled={loading || disabled || !prompt.trim()}
-          style={{
-            padding: "12px 24px",
-            background: loading || disabled
-              ? "rgba(255,255,255,0.3)"
-              : "#fff",
-            color: loading || disabled ? "#aaa" : "#667eea",
-            border: "none",
-            borderRadius: 10,
-            fontWeight: "bold",
-            cursor:
-              loading || disabled || !prompt.trim()
-                ? "not-allowed"
-                : "pointer",
-            fontSize: 14,
-            transition: "all 0.2s",
-            display: "flex",
-            alignItems: "center",
-            gap: 6,
-          }}
-        >
-          {loading ? (
-            <>
-              <span
-                style={{
-                  display: "inline-block",
-                  width: 12,
-                  height: 12,
-                  border: "2px solid #aaa",
-                  borderTopColor: "transparent",
-                  borderRadius: "50%",
-                  animation: "spin 0.8s linear infinite",
-                }}
-              />
-              Procesando...
-            </>
-          ) : (
-            <>
-              <span>✨</span> Generar
-            </>
-          )}
-        </button>
-      </form>
-
-      {/* Contador de caracteres */}
-      <div
-        style={{
-          marginTop: 8,
-          fontSize: 11,
-          color: "rgba(255,255,255,0.7)",
-          textAlign: "right",
-        }}
-      >
-        {prompt.length}/500 caracteres
-      </div>
-
-      {/* Mensaje de error */}
-      {error && (
+        {/* Barra principal */}
         <div
           style={{
-            marginTop: 12,
-            padding: "10px 14px",
-            background: "rgba(255, 59, 48, 0.2)",
-            borderRadius: 8,
-            color: "#fff",
-            fontSize: 13,
             display: "flex",
             alignItems: "center",
+            background: "#1c1c1c",
+            borderRadius: 24,
+            padding: "8px 12px",
+            boxShadow: "0 4px 20px rgba(0,0,0,0.5)",
+            border: "1px solid #333",
             gap: 8,
-            border: "1px solid rgba(255, 59, 48, 0.4)",
           }}
         >
-          <span>⚠️</span>
-          <span>{error}</span>
-        </div>
-      )}
+          {/* Input principal */}
+          <input
+            type="text"
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={
+              isRecording
+                ? "🎤 Escuchando..."
+                : 'Ej: "Crea tabla cliente con id, nombre, email..."'
+            }
+            disabled={loading || disabled || isRecording}
+            maxLength={500}
+            style={{
+              flex: 1,
+              background: "transparent",
+              border: "none",
+              outline: "none",
+              color: "#fff",
+              fontSize: 14,
+              padding: "8px 12px",
+            }}
+          />
 
-      {/* Sugerencias */}
-      {!loading && !error && prompt.length === 0 && (
-        <div
-          style={{
-            marginTop: 12,
-            padding: "10px 14px",
-            background: "rgba(255,255,255,0.1)",
-            borderRadius: 8,
-            color: "rgba(255,255,255,0.8)",
-            fontSize: 12,
-            lineHeight: 1.5,
-          }}
-        >
-          <div style={{ fontWeight: "bold", marginBottom: 4 }}>
-            💡 Ejemplos de prompts:
-          </div>
-          <div style={{ opacity: 0.9 }}>
-            • "Crea tabla usuario con id, email, nombre"
-            <br />
-            • "Relación 1 a muchos entre cliente y pedido"
-            <br />
-            • "Producto y categoría muchos a muchos"
-            <br />• "Agrega campo telefono VARCHAR(20) a tabla usuario"
-          </div>
+          {/* Contador de caracteres */}
+          <span
+            style={{
+              fontSize: 11,
+              color: prompt.length > 450 ? "#ef4444" : "#666",
+              whiteSpace: "nowrap",
+            }}
+          >
+            {prompt.length}/500
+          </span>
+
+          {/* Botón de micrófono (solo si está soportado) */}
+          {speechSupported && (
+            <button
+              type="button"
+              onClick={handleMicClick}
+              disabled={loading || disabled}
+              style={{
+                background: "transparent",
+                border: "none",
+                cursor: loading || disabled ? "not-allowed" : "pointer",
+                fontSize: 20,
+                padding: "4px 8px",
+                transition: "all 0.2s",
+                opacity: loading || disabled ? 0.3 : 1,
+              }}
+              title={isRecording ? "Detener grabación" : "Grabar con voz"}
+            >
+              {isRecording ? "🔴" : "🎤"}
+            </button>
+          )}
+
+          {/* Botón de enviar */}
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={loading || disabled || !prompt.trim() || isRecording}
+            style={{
+              background:
+                loading || disabled || !prompt.trim() || isRecording
+                  ? "#333"
+                  : "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+              color: "#fff",
+              border: "none",
+              borderRadius: 16,
+              padding: "8px 20px",
+              cursor:
+                loading || disabled || !prompt.trim() || isRecording
+                  ? "not-allowed"
+                  : "pointer",
+              fontSize: 14,
+              fontWeight: "600",
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              transition: "all 0.2s",
+              whiteSpace: "nowrap",
+            }}
+            title="Enviar prompt (Enter)"
+          >
+            {loading ? (
+              <>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 14,
+                    height: 14,
+                    border: "2px solid rgba(255,255,255,0.3)",
+                    borderTopColor: "#fff",
+                    borderRadius: "50%",
+                    animation: "spin 0.6s linear infinite",
+                  }}
+                />
+                <span>Generando...</span>
+              </>
+            ) : (
+              <>
+                <span>✨</span>
+                <span>Generar</span>
+              </>
+            )}
+          </button>
         </div>
-      )}
+
+        {/* Ayuda rápida (solo cuando está vacío) */}
+        {!loading && !error && prompt.length === 0 && !isRecording && (
+          <div
+            style={{
+              marginTop: 8,
+              padding: "6px 16px",
+              background: "rgba(0,0,0,0.7)",
+              borderRadius: 8,
+              color: "#aaa",
+              fontSize: 11,
+              textAlign: "center",
+            }}
+          >
+            💡 Presiona{" "}
+            <kbd
+              style={{
+                background: "#333",
+                padding: "2px 6px",
+                borderRadius: 4,
+                fontFamily: "monospace",
+              }}
+            >
+              Enter
+            </kbd>{" "}
+            para enviar
+            {speechSupported && (
+              <>
+                {" "}
+                o{" "}
+                <kbd
+                  style={{
+                    background: "#333",
+                    padding: "2px 6px",
+                    borderRadius: 4,
+                  }}
+                >
+                  🎤
+                </kbd>{" "}
+                para dictar
+              </>
+            )}
+          </div>
+        )}
+      </div>
 
       {/* Keyframe animation para spinner */}
       <style>
@@ -264,6 +365,6 @@ export function AIPromptBar({
           }
         `}
       </style>
-    </div>
+    </>
   );
 }
