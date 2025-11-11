@@ -976,6 +976,7 @@ EXAM_2_SW/
 **`packages/server/.env`** - Variables de entorno (NO commitear)
 
 **Variables:**
+
 - `PORT=3001` - Puerto del servidor
 - `DATABASE_URL="postgresql://postgres:postgres@db:5432/diagram_editor"` - Conexión a PostgreSQL
   - Host `db` para Docker
@@ -983,6 +984,7 @@ EXAM_2_SW/
 - `OPENAI_API_KEY="sk-proj-..."` 🧠 - API key de OpenAI (obligatoria para IA)
 
 **Dónde cambiar:**
+
 - Puerto: Modificar valor de `PORT`
 - Base de datos: Cambiar host `db` → `localhost` si no usas Docker
 - API key: Obtener en https://platform.openai.com/api-keys
@@ -994,6 +996,7 @@ EXAM_2_SW/
 **Qué hace:** Plantilla para crear tu propio `.env` sin exponer secretos
 
 **Contenido:**
+
 ```
 PORT=3001
 DATABASE_URL="postgresql://postgres:postgres@db:5432/diagram_editor?schema=public"
@@ -1007,6 +1010,7 @@ DATABASE_URL="postgresql://postgres:postgres@db:5432/diagram_editor?schema=publi
 **`packages/server/package.json`** - Dependencias y scripts
 
 **Scripts:**
+
 - `npm run dev` - Desarrollo con hot-reload (ts-node-dev)
 - `npm run build` - Compilar TypeScript → JavaScript en `dist/`
 - `npm start` - Ejecutar servidor compilado
@@ -1014,6 +1018,7 @@ DATABASE_URL="postgresql://postgres:postgres@db:5432/diagram_editor?schema=publi
 - `npm run prisma:migrate` - Crear migración de BD
 
 **Dependencias principales:**
+
 - `express` ^4.19.2 - Framework web
 - `socket.io` ^4.8.1 - WebSocket
 - `@prisma/client` ^5.20.0 - ORM
@@ -1023,10 +1028,12 @@ DATABASE_URL="postgresql://postgres:postgres@db:5432/diagram_editor?schema=publi
 - `dotenv` ^16.4.5 - Variables de entorno
 
 **Dev dependencies:**
+
 - `typescript` ^5.6.3, `prisma` ^5.20.0, `ts-node-dev` ^2.0.0
 - Tipos: `@types/express`, `@types/cors`, `@types/node`
 
 **Dónde cambiar:**
+
 - Versiones: Modificar números de versión y ejecutar `npm install`
 - Scripts: Agregar/modificar comandos personalizados
 
@@ -1037,6 +1044,7 @@ DATABASE_URL="postgresql://postgres:postgres@db:5432/diagram_editor?schema=publi
 **Qué hace:** Define cómo compilar TypeScript a JavaScript
 
 **Configuración clave:**
+
 - `target: "ES2020"` - Versión de JavaScript objetivo
 - `module: "ES2020"` - Sistema de módulos (import/export)
 - `moduleResolution: "Bundler"` - Resolución para bundlers modernos
@@ -1046,6 +1054,7 @@ DATABASE_URL="postgresql://postgres:postgres@db:5432/diagram_editor?schema=publi
 - `paths: { "@shared/*": ["../shared/*"] }` - Alias para imports compartidos
 
 **Dónde cambiar:**
+
 - Target JS: `ES2020` → `ES2022` para features más nuevas
 - Strict mode: `strict: false` si quieres validación relajada
 - Output: `outDir: "build"` para cambiar carpeta de compilación
@@ -1057,211 +1066,431 @@ DATABASE_URL="postgresql://postgres:postgres@db:5432/diagram_editor?schema=publi
 
 **`packages/web/src/components/`**
 
-**`ErrorBoundary.tsx`**
+**`TableNode.tsx`** - Nodo visual de tabla para ReactFlow
 
-> Componente de manejo de errores global para React
+**Qué hace:** Renderiza tabla ER en el canvas con campos, tipos y relaciones visuales
 
-- Captura errores de renderizado en toda la aplicación
-- Muestra pantalla amigable con detalles del error
-- Incluye stack trace del componente para debugging
-- Botón para recargar la página automáticamente
+**Props:**
 
-**`TableNode.tsx`**
+- `id: string` - ID único del nodo
+- `data: TableData` - Nombre de tabla y array de campos
+- `selected?: boolean` - Si está seleccionado (borde cyan con glow)
 
-> Nodo visual para tablas de base de datos (ER Diagram)
+**Características visuales:**
 
-- Renderiza nombre de tabla y campos con tipos de datos
-- Indicadores visuales: 🔑 PK (borde dorado), 🔗 FK (borde azul)
-- Handles de conexión arriba (target) y abajo (source)
-- Resaltado especial cuando está seleccionado (borde cyan con glow)
-- Mensaje interactivo cuando está seleccionado
-- Diseño compacto (240px ancho) con scroll automático
+- Width fijo: 240px
+- Borde PK: dorado (#FFD700) a la izquierda
+- Borde FK: azul (#667eea) a la izquierda
+- Header: fondo #333 (o #667eea si selected)
+- Handles: arriba (target, verde) y abajo (source, azul)
+- Footer cuando selected: "✏ Edita en el panel derecho"
 
-**`PropertiesPanel.tsx`**
+**Dónde cambiar:**
 
-> Panel lateral derecho para editar propiedades de tablas
+- **Ancho de nodo:** Línea 18 `width: 240` - ajustar en px
+- **Color PK:** Línea 41 `#FFD700` - cambiar color de borde
+- **Color FK:** Línea 41 `#667eea` - cambiar color de borde
+- **Color selected:** Línea 18 `border: "3px solid #00f5ff"` - cambiar color cyan
+- **Tamaño de handles:** Línea 28 `width: 10, height: 10` - ajustar tamaño
 
-- Edición de nombre de tabla
-- CRUD de campos (nombre, tipo, PK, FK, nullable)
-- Selector de tipos PostgreSQL predefinidos (VARCHAR, INT, TIMESTAMP, etc.)
-- Configuración de relaciones FK con tablas disponibles
-- Selector de tipo de relación (1-1, 1-N, N-N)
-- Botones de duplicar/eliminar campo
-- Auto-actualiza nodo en canvas al modificar
-- Integración con Socket.IO para sincronización en tiempo real
-
-**`Sidebar.tsx`**
-
-> Panel lateral izquierdo con estadísticas y acciones
-
-- Contador de tablas y relaciones
-- Botón para agregar nueva tabla
-- Botón para exportar SQL
-- Lista navegable de todas las tablas con:
-  - Nombre y contadores (campos, PK, FK)
-  - Indicador visual de tabla seleccionada
-  - Botón de eliminar tabla con confirmación
-- Diseño compacto (280px ancho) con scroll
-
-**`AIPromptBar.tsx`** 🧠⭐
-
-> Barra compacta tipo ChatGPT con IA multimodal: texto 📝 + voz 🎤 + imagen 📷
-
-- **Interfaz de usuario:**
-  - Diseño compacto horizontal (~50-70px altura) con layout tipo ChatGPT
-  - Input de texto flex con placeholder dinámico y límite de 500 caracteres
-  - Contador de caracteres en tiempo real (rojo cuando >450 chars)
-  - **Botón cámara 📷:** Analizar imágenes de diagramas ER
-    - Abre selector de archivos (accept: image/\*)
-    - Redimensiona automáticamente a 1200px máximo
-    - Comprime con calidad 0.8 (JPEG)
-    - Valida tamaño (máx 10MB antes de comprimir)
-    - Convierte a Base64 y envía a `/api/ai/parse-image`
-    - Usa Canvas API (sin dependencias externas)
-  - **Botón micrófono 🎤:** Reconocimiento de voz con Web Speech API (español)
-    - Solo visible si el navegador soporta Web Speech API (Chrome/Edge)
-    - Cambia a 🔴 durante grabación activa
-    - Placeholder dinámico: "🎤 Escuchando..." mientras graba
-    - Transcripción automática al input (editable antes de enviar)
-    - Detección automática de fin de frase (continuous: false)
-  - Botón "✨ Generar" con gradiente morado (#667eea → #764ba2)
-  - Spinner de loading inline durante procesamiento
-  - Mensajes de error flotantes encima de la barra (auto-desaparecen en 3-5s)
-  - Ayuda contextual compacta con atajos de teclado solo cuando input vacío
-  - Fondo oscuro (#1c1c1c) con border radius 24px
-- **Funcionalidad:**
-  - **Análisis de imágenes (Canvas API + GPT-4o-mini Vision):**
-    - Función `resizeAndCompressImage(file, maxSize=1200, quality=0.8)`
-    - Calcula escala manteniendo proporciones
-    - Dibuja en canvas temporal y comprime
-    - Extrae Base64 puro (sin prefijo data:image)
-    - Logs detallados: 📷 [Image] con tamaño en KB
-    - Endpoint: `POST /api/ai/parse-image`
-  - **Reconocimiento de voz (Web Speech API):**
-    - Idioma: español (es-ES)
-    - Modo: no continuo (se detiene al finalizar frase)
-    - Sin resultados intermedios (solo transcripción final)
-    - Manejo de errores con logs detallados (🎤 [Voice])
-    - Estado isRecording para feedback visual
-    - Auto-detección de soporte del navegador
-  - **Procesamiento de texto:**
-    - Envía prompt a endpoint `/api/ai/parse-intent` vía POST
-    - Validación local de longitud (máx 500 chars) antes de enviar
-  - Callback `onActionsReceived(actions)` para aplicar acciones en editor
-  - Manejo de estados: normal, loading, recording, error
-  - Limpia input después de éxito
-  - Control de acceso: solo visible para OWNER/EDITOR (no VIEWER/GUEST)
-  - Atajos de teclado: Enter para enviar (sin Shift)
-- **Props:**
-  - `projectId: string` - ID del proyecto actual
-  - `userId: string` - ID del usuario (para logs y auditoría)
-  - `onActionsReceived: (actions: any[]) => void` - Callback para aplicar acciones
-- **Integración con DiagramEditor:**
-  - Renderizado condicional: `{!isViewer && !isGuest && <AIPromptBar />}`
-  - Posicionado en footer con `position: fixed; bottom: 16px`
-  - Conectado con función `applyAIActions()` para ejecución de acciones
-  - Sincronización automática vía Socket.IO después de aplicar
-- **Estilos:**
-  - Max-width: 800px (centrado horizontalmente)
-  - Altura: ~50-70px (compacta, deja más espacio al diagrama)
-  - Border radius: 24px con sombra oscura
-  - Fondo: #1c1c1c (dark solid, sin glassmorphism)
-  - Layout: horizontal con input flex:1, botones a la derecha (📷 🎤 ✨)
-  - Responsive: padding adaptativo según ancho de pantalla
-- **Compatibilidad:**
-  - **Análisis de imágenes:** ✅ Todos los navegadores (Canvas API estándar)
-  - **Web Speech API:** ✅ Chrome/Edge | ✅ Safari (webkit) | ❌ Firefox (botón oculto)
-- **Ejemplos de uso por texto:**
-  - "Crea una tabla cliente con id, nombre, email, teléfono"
-  - "Relación 1 a muchos entre cliente y pedido"
-  - "Crea una relación muchos a muchos entre persona y perfil"
-  - "Agrega campo telefono VARCHAR(20) a tabla usuario"
-- **Ejemplos de uso por voz (español):**
-  - 🎤 "Crea tabla usuario con id nombre email contraseña"
-  - 🎤 "Agrega campo teléfono a tabla cliente"
-  - 🎤 "Relación uno a muchos entre cliente y pedido"
-- **Ejemplos de uso por imagen:**
-  - 📷 Screenshot de diagrama de Lucidchart
-  - 📷 Foto de diagrama en pizarra
-  - 📷 Diagrama exportado de MySQL Workbench
-  - 📷 Boceto en papel escaneado con notación Crow's Foot
-- **Manejo de errores:**
-  - API key inválida: "Error: Invalid OpenAI API key"
-  - Rate limit: "Rate limit exceeded. Please try again later"
-  - Prompt vacío: "Por favor ingresa un prompt"
-  - Prompt muy largo: "El prompt no puede exceder 500 caracteres"
-  - Error de red: "Error al procesar el prompt"
-  - **Errores de voz:**
-    - Sin soporte: Botón oculto automáticamente
-    - Sin permisos: "Error de voz: not-allowed"
-    - Sin audio: "Error de voz: no-speech"
-    - Error de red: "Error de voz: network"
-  - **Errores de imagen:**
-    - Archivo inválido: "Por favor selecciona un archivo de imagen válido"
-    - Tamaño excesivo: "La imagen es muy grande. Tamaño máximo: 10MB"
-    - Sin detecciones: "No se detectaron tablas o relaciones en la imagen"
-    - Error de procesamiento: "Error al analizar la imagen"
+**Dependencias:** reactflow, @shared/types
 
 ---
 
-### Paquete Compartido (Shared)
+**`PropertiesPanel.tsx`** - Panel derecho de edición de tablas
 
-**`packages/shared/types.ts`** (156 líneas)
+**Qué hace:** Editor completo de propiedades de tablas (nombre, campos, tipos, relaciones)
 
-> Tipos TypeScript compartidos entre frontend y backend - Single source of truth
+**Props:**
 
-**Contenido completo:**
+- `selectedNode: Node | null` - Nodo actualmente seleccionado
+- `availableTables: string[]` - Lista de tablas para FK
+- `edges?: Edge[]` - Relaciones actuales del diagrama
+- `onUpdate: (nodeId, data) => void` - Callback para actualizar nodo
+- `socket?: any` - Socket.IO para sincronización
+- `project?: any` - Proyecto actual
 
-- **Enums (1):**
+**Funciones principales:**
 
-  - `Role` - OWNER, EDITOR, VIEWER (control de permisos)
+- `updateTable(key, value)` - Actualiza propiedad de tabla (nombre, fields)
+- `updateField(index, key, value)` - Actualiza campo específico
+- `addField()` - Crea campo nuevo con ID timestamp
+- `removeField(i)` - Elimina campo y su relación FK si existe
+- `duplicateField(i)` - Clona campo con sufijo "\_copia"
 
-- **Tipos de Diagrama (2):**
+**Tipos PostgreSQL disponibles (16):**
+VARCHAR(255), VARCHAR(100), TEXT, INT, BIGINT, SERIAL, BIGSERIAL, BOOLEAN, DATE, TIMESTAMP, TIMESTAMPTZ, DECIMAL(10,2), NUMERIC, JSON, JSONB, UUID
 
-  - `Field` - Estructura de campos de tabla (12 propiedades: id, name, type, isPrimary, isForeign, nullable, references, referencesField, relationType, unique, defaultValue)
-  - `TableData` - Datos completos de nodo tabla (name, label, fields[])
+**Comportamiento automático:**
 
-- **Modelos Prisma (8):**
+- Marcar PK → auto-marca NOT NULL (nullable: false)
+- Desmarcar FK → limpia referencias (references: null)
+- Eliminar campo FK → elimina edge visual con `removeFKRelation()`
 
-  - `User` - Usuario del sistema (id, email, name, createdAt)
-  - `Project` - Proyecto contenedor (id, name, description, isPublic, ownerId, users, diagrams)
-  - `ProjectUser` - Relación usuario-proyecto con rol (id, role, userId, projectId)
-  - `Diagram` - Diagrama ER (id, projectId, authorId, name, data JSON, version)
-  - `Session` - Sesión de presencia (id, userId, diagramId, lastPing)
-  - `Lock` - Bloqueo de recursos (id, diagramId, resourceId, userId, expiresAt)
-  - `DiagramChange` - Auditoría de cambios (id, diagramId, userId, action, payload)
-  - `Invitation` - Invitaciones por token (id, projectId, email, role, token)
+**Dónde cambiar:**
 
-- **Eventos WebSocket (2):**
+- **Ancho del panel:** Línea 142 `width: 320` - ajustar en px
+- **Color del header:** Línea 151 `borderBottom: "2px solid #667eea"` - cambiar color
+- **Tipos de datos:** Líneas 16-32 array `DATA_TYPES` - agregar/quitar tipos
+- **Campo default:** Línea 108 `name: "nuevo_campo", type: "VARCHAR(255)"` - cambiar defaults
+- **Color botón agregar:** Línea 231 `background: "#667eea"` - cambiar color
 
-  - `PresenceUser` - Usuario activo (userId, name, role, socketId)
-  - `DiagramUpdatePayload` - Cambios en tiempo real (action: ADD_NODE/UPDATE_NODE/DELETE_NODE/MOVE_NODE/ADD_EDGE/DELETE_EDGE)
+**Dependencias:** reactflow, @shared/types, relationHandler
 
-- **API DTOs (6):**
-  - `LoginRequest` / `LoginResponse` - Autenticación
-  - `CreateProjectRequest` - Crear proyecto
-  - `CreateInvitationRequest` / `CreateInvitationResponse` - Sistema de invitaciones
-  - `AcceptInvitationRequest` - Aceptar invitación
+---
 
-**Uso:** `import type { Field, TableData, Role, User } from "@shared/types"`
+**`Sidebar.tsx`** - Panel izquierdo con estadísticas y acciones
 
-**Archivos que lo usan (5):**
+**Qué hace:** Lista de tablas, contadores y botones de exportación
 
-- `packages/web/src/components/TableNode.tsx`
-- `packages/web/src/components/Sidebar.tsx`
-- `packages/web/src/components/PropertiesPanel.tsx`
-- `packages/web/src/utils/sqlGenerator.ts`
-- `packages/web/src/utils/relationHandler.ts`
+**Props:**
+
+- `nodes: Node[]` - Todos los nodos del diagrama
+- `edges: Edge[]` - Todas las relaciones
+- `selectedNode: string | null` - ID del nodo seleccionado
+- `onAddNode: () => void` - Crear nueva tabla
+- `onExportSQL: () => void` - Exportar a SQL
+- `onExportSpringBoot: () => void` - Exportar a Spring Boot
+- `onExportFlutter: () => void` - Exportar a Flutter
+- `onDeleteNode?: (nodeId) => void` - Eliminar tabla
+
+**Estadísticas mostradas:**
+
+- Cantidad de tablas (contador grande morado)
+- Cantidad de relaciones (contador grande cyan)
+
+**Información por tabla:**
+
+- Nombre de tabla con emoji 📦
+- Total de campos
+- Cantidad de PKs (🔑)
+- Cantidad de FKs (🔗)
+- Botón eliminar (🗑️) con confirmación
+
+**Dónde cambiar:**
+
+- **Ancho del panel:** Línea 37 `width: 280` - ajustar en px
+- **Color contador tablas:** Línea 70 `color: "#667eea"` - cambiar color
+- **Color contador relaciones:** Línea 76 `color: "#764ba2"` - cambiar color
+- **Gradiente botón nueva tabla:** Línea 86 `#667eea → #764ba2` - cambiar colores
+- **Color hover Spring Boot:** Línea 135 `#6aaf50` - cambiar verde
+- **Color hover Flutter:** Línea 157 `#42A5F5` - cambiar azul
+
+**Dependencias:** reactflow, @shared/types
+
+---
+
+**`AIPromptBar.tsx`** 🧠 - Barra de IA multimodal (texto + voz + imagen)
+
+**Qué hace:** Input compacto tipo ChatGPT para crear diagramas con IA (GPT-4o-mini + Vision)
+
+**Props:**
+
+- `projectId: string` - ID del proyecto actual
+- `userId: string` - ID del usuario (para auditoría)
+- `onActionsReceived: (actions[]) => void` - Callback para aplicar acciones al diagrama
+- `disabled?: boolean` - Desactivar input
+
+**Funciones principales:**
+
+- `handleSubmit()` - POST a `/api/ai/parse-intent` con prompt de texto
+- `handleImageUpload()` - POST a `/api/ai/parse-image` con imagen Base64
+- `resizeAndCompressImage(file, maxSize, quality)` - Redimensiona a 1200px y comprime a 0.8
+- `handleMicClick()` - Inicia/detiene Web Speech API (español)
+
+**3 modos de entrada:**
+
+1. **Texto 📝:** Input con límite 500 chars, enviar con Enter
+2. **Voz 🎤:** Web Speech API (es-ES), auto-transcribe al input
+3. **Imagen 📷:** Canvas API redimensiona + GPT-4o-mini Vision analiza
+
+**Validaciones:**
+
+- Longitud prompt: máx 500 caracteres (rojo >450)
+- Tipo archivo: solo `image/*`
+- Tamaño imagen: máx 10MB antes de comprimir
+- Endpoint health check antes de enviar
+
+**Estados visuales:**
+
+- Normal: placeholder "Ej: 'Crea tabla cliente...'"
+- Recording: placeholder "🎤 Escuchando..."
+- Loading: spinner inline + input deshabilitado
+- Error: mensaje flotante rojo (auto-desaparece 3-5s)
+
+**Dónde cambiar:**
+
+- **Límite de caracteres:** Línea 76 `if (trimmedPrompt.length > 500)` - cambiar número
+- **Max tamaño imagen:** Línea 242 `> 10 * 1024 * 1024` - cambiar en bytes
+- **Calidad compresión:** Línea 254 `resizeAndCompressImage(file, 1200, 0.8)` - cambiar 0.8
+- **Tamaño redimensión:** Línea 254 segundo parámetro `1200` - cambiar max width/height
+- **Idioma de voz:** Línea 39 `recognition.lang = "es-ES"` - cambiar a en-US, etc.
+- **Gradiente botón:** Buscar `#667eea → #764ba2` - cambiar colores
+- **Posición:** Línea 320 `bottom: 16` - cambiar distancia del borde
+
+**Compatibilidad:**
+
+- Imagen: ✅ Todos (Canvas API estándar)
+- Voz: ✅ Chrome/Edge | ✅ Safari (webkit) | ❌ Firefox (botón oculto)
+
+**Dependencias:** api.ts (Axios), Web Speech API, Canvas API
+
+---
+
+**`ErrorBoundary.tsx`** - Manejo de errores global de React
+
+**Qué hace:** Captura errores de renderizado y muestra pantalla de fallback
+
+**Métodos React:**
+
+- `getDerivedStateFromError(error)` - Actualiza state al detectar error
+- `componentDidCatch(error, errorInfo)` - Log del error y component stack
+
+**Pantalla de error muestra:**
+
+- Emoji 🚨 grande
+- Título "Algo salió mal"
+- Mensaje de error completo (.toString())
+- Component stack trace (pre formateado)
+- Botón "🔄 Recargar página" (window.location.reload())
+
+**Dónde cambiar:**
+
+- **Color de fondo:** Línea 53 `background: "#1a1a1a"` - cambiar color
+- **Color del error:** Línea 78 `color: "#FF5722"` - cambiar rojo
+- **Color botón:** Línea 93 `background: "#4CAF50"` - cambiar verde
+- **Textos:** Líneas 60-64 - personalizar mensajes
+
+**Uso:** Envuelve toda la app en `App.tsx` o `main.tsx`
+
+**Dependencias:** react (Component, ErrorInfo)
+
+---
+
+### � Páginas del Frontend
+
+**`packages/web/src/pages/`**
+
+**`Login.tsx`** - Página de autenticación
+
+**Qué hace:** Login/registro sin contraseña (solo email + nombre)
+
+**Funciones:**
+
+- `handleLogin()` - POST a `/api/users/login` con email y nombre
+- Validación de email con regex `^[^\s@]+@[^\s@]+\.[^\s@]+$`
+- Manejo de invitaciones: parámetro URL `?fromInvite=TOKEN`
+- Si viene de invitación: vincular usuario y redirigir a proyecto
+- Si no: redirigir a dashboard o returnUrl guardada
+- Guarda usuario en store Zustand (`setUser`)
+
+**Dónde cambiar:**
+
+- **Regex de email:** Línea 24 - cambiar patrón de validación
+- **Redirección default:** Línea 68 `navigate("/dashboard")` - cambiar ruta
+- **Estilos del gradiente:** Líneas 90-93 colores `#667eea → #764ba2`
+
+**Dependencias:** react-router-dom, api.ts, useAppStore
+
+---
+
+**`Dashboard.tsx`** - Panel de proyectos del usuario
+
+**Qué hace:** Lista y gestiona proyectos, crea invitaciones, unirse por link
+
+**Funciones principales:**
+
+- `loadProjects()` - GET `/api/projects/${userId}` para cargar lista
+- `createProject()` - POST `/api/projects` con nombre y userId
+- `createInvitation(projectId)` - POST `/api/invitations/create` con rol EDITOR
+  - Genera link universal: `http://localhost:3001/invite/TOKEN`
+- `openProject(project)` - Guarda proyecto en store y navega a `/project/${id}`
+- `joinByLink()` - Extrae token con regex `/invite/([a-f0-9]+)/` y navega
+- `handleLogout()` - Desconecta socket y limpia store
+
+**Estadísticas mostradas:**
+
+- Cantidad de miembros por proyecto (`project.users.length`)
+- Cantidad de diagramas por proyecto (`project.diagrams.length`)
+
+**Dónde cambiar:**
+
+- **Rol de invitación default:** Línea 59 `role: "EDITOR"` - cambiar a OWNER/VIEWER
+- **URL base de invitaciones:** Línea 63 `res.data.url` viene del backend (ver routes/invitations.ts)
+- **Regex de token:** Línea 82 `[a-f0-9]+` - si cambias formato de token
+- **Colores del gradiente:** Múltiples líneas con `#667eea → #764ba2`
+
+**Dependencias:** react-router-dom, api.ts, useAppStore, socketManager
+
+---
+
+**`AcceptInvite.tsx`** - Procesamiento de invitaciones
+
+**Qué hace:** Acepta invitación y une usuario a proyecto (con o sin login)
+
+**Flujo:**
+
+1. Extrae `token` de la URL (`/invite/:token`)
+2. GET `/api/invitations/${token}` para validar
+3. **Si NO hay usuario logueado:**
+   - Crea usuario temporal: `{ id: "guest_${Date.now()}", name: "Invitado", email: "guest@temp.com" }`
+   - Usuario entra como VIEWER (solo lectura)
+   - Navega a `/project/${id}?fromInvite=${token}`
+4. **Si hay usuario logueado:**
+   - POST `/api/invitations/accept` con token y userId
+   - Vincula permanentemente al proyecto
+   - Navega a `/project/${id}`
+
+**Estados mostrados:**
+
+- `🔍 Validando invitación...` (inicial)
+- `�️ Accediendo al proyecto "X" como invitado...` (sin login)
+- `📋 Uniéndote al proyecto "X"...` (con login)
+- `❌ Invitación no encontrada` (error 404)
+- `❌ Error al procesar la invitación` (otros errores)
+
+**Dónde cambiar:**
+
+- **Prefijo de guest ID:** Línea 27 `guest_${Date.now()}` - cambiar formato
+- **Nombre de invitado:** Línea 28 `"Invitado"` - cambiar texto
+- **Delay de redirección:** Líneas 35 y 48 `setTimeout(..., 1500)` - cambiar ms
+- **Mensajes de estado:** Líneas 14-51 - personalizar textos
+
+**Dependencias:** react-router-dom, api.ts, useAppStore
+
+---
+
+**`DiagramEditor.tsx`** - Editor colaborativo de diagramas ER
+
+**Qué hace:** Canvas principal con ReactFlow, Socket.IO, IA, y colaboración en tiempo real
+
+_Nota: Este archivo es muy extenso y complejo. Ver sección de Componentes y Utilidades para más detalles._
+
+**Funcionalidades principales:**
+
+- Editor de diagramas ER con drag & drop (ReactFlow)
+- Sincronización en tiempo real vía Socket.IO
+- Sistema de presencia de usuarios (avatares en vivo)
+- Integración IA (AIPromptBar) para crear tablas/relaciones por texto/voz/imagen
+- Sistema de locks (bloqueo de tablas mientras se editan)
+- Exportación SQL, Spring Boot, Flutter
+- Sidebar con lista de tablas
+- PropertiesPanel para editar campos
+- Sistema de roles (OWNER/EDITOR/VIEWER)
+- Control de inactividad (auto-desconexión a 60s)
+
+**Componentes renderizados:**
+
+- `<Sidebar />` - Panel izquierdo con lista de tablas
+- `<ReactFlow />` - Canvas principal con nodos y edges
+- `<PropertiesPanel />` - Panel derecho para editar
+- `<AIPromptBar />` - Barra inferior de IA (solo OWNER/EDITOR)
+- Avatares de usuarios en línea (esquina superior derecha)
+
+**Eventos Socket.IO emitidos:**
+
+- `join-project` - Al montar componente
+- `leave-project` - Al desmontar componente
+- `diagram-change` - Al modificar nodos/edges
+- `ping-diagram` - Cada 30s para mantener presencia
+- `request-lock` - Al seleccionar tabla (bloqueo temporal 30s)
+- `release-lock` - Al deseleccionar tabla
+
+**Eventos Socket.IO escuchados:**
+
+- `diagram-update` - Cambios de otros usuarios
+- `presence-update` - Lista de usuarios en línea actualizada
+- `lock-acquired` / `lock-released` - Estado de locks
+
+**Dónde cambiar:**
+
+- **Intervalo de ping:** Buscar `setInterval` con 30000ms
+- **TTL de inactividad:** Backend en `routes/sessions.ts` (60s)
+- **Colores de roles:** Buscar `#667eea` (OWNER), `#4CAF50` (EDITOR), etc.
+- **Posición inicial de nodos:** Función `addNode()` con coordenadas x,y
+
+**Dependencias:** reactflow, socket.io-client, zustand, Sidebar, PropertiesPanel, AIPromptBar, api.ts, socketManager
+
+---
+
+### �📦 Paquete Compartido (Shared)
+
+**`packages/shared/types.ts`** - Tipos TypeScript compartidos
+
+**Qué hace:** Single source of truth para tipos entre frontend y backend
+
+**Contenido (156 líneas):**
+
+**1. Enums**
+
+- `Role` - OWNER, EDITOR, VIEWER
+
+**2. Tipos de Diagrama**
+
+- `Field` - Estructura de campo de tabla
+  - Props: `id, name, type, isPrimary, isForeign, nullable, references, referencesField, relationType, unique, defaultValue`
+- `TableData` - Datos completos de tabla
+  - Props: `name, label, fields[]`
+
+**3. Modelos Prisma (8 interfaces)**
+
+- `User` - id, email, name, createdAt
+- `Project` - id, name, description, isPublic, ownerId, users[], diagrams[]
+- `ProjectUser` - id, role, userId, projectId
+- `Diagram` - id, projectId, authorId, name, data (JSON), version
+- `Session` - id, userId, diagramId, lastPing
+- `Lock` - id, diagramId, resourceId, userId, expiresAt
+- `DiagramChange` - id, diagramId, userId, action, payload (JSON)
+- `Invitation` - id, projectId, email, role, token
+
+**4. Eventos WebSocket**
+
+- `PresenceUser` - userId, name, role, socketId
+- `DiagramUpdatePayload` - action (ADD_NODE | UPDATE_NODE | DELETE_NODE | MOVE_NODE | ADD_EDGE | DELETE_EDGE), payload
+
+**5. API DTOs**
+
+- `LoginRequest/Response` - Autenticación
+- `CreateProjectRequest` - Crear proyecto
+- `CreateInvitationRequest/Response` - Sistema de invitaciones
+- `AcceptInvitationRequest` - Aceptar invitación
+
+**Uso:**
+
+```typescript
+import type { Field, TableData, Role, User } from "@shared/types";
+```
+
+**Archivos que lo importan:**
+
+- `components/` - TableNode.tsx, Sidebar.tsx, PropertiesPanel.tsx
+- `utils/` - sqlGenerator.ts, relationHandler.ts, generadores
+- `server/src/routes/` - Todas las rutas del backend
 
 **Ventajas:**
 
-- Elimina duplicación de tipos en 5+ archivos
-- TypeScript valida compatibilidad automáticamente
-- Preparado para generación Spring Boot/Flutter/OpenAPI
+- ✅ Sin duplicación de tipos (DRY)
+- ✅ TypeScript valida compatibilidad automáticamente
+- ✅ Cambio en un lugar = actualiza en todos lados
 
-**`packages/shared/package.json`**
+**Dónde cambiar:**
 
-> Configuración del paquete shared (privado, monorepo)
+- Agregar nuevos roles: Enum `Role` línea ~12
+- Agregar campos a Field: Interface `Field` línea ~18
+- Nuevos modelos: Agregar después de línea ~140
+
+---
+
+**`packages/shared/package.json`** - Config del paquete
+
+**Qué hace:** Define el paquete compartido como módulo privado del monorepo
+
+**Props:**
+
+- `name: "@exam2/shared"` - Nombre del paquete
+- `private: true` - No se publica en npm
+- `main: "types.ts"` - Entry point
+- `types: "types.ts"` - Definiciones TypeScript
 
 ---
 
@@ -1391,224 +1620,230 @@ DATABASE_URL="postgresql://postgres:postgres@db:5432/diagram_editor?schema=publi
 
 ### 🛠️ Utilidades del Frontend
 
-**`packages/web/src/utils/`** - Helpers, generadores y lógica de UI
+**`packages/web/src/utils/`**
 
-#### `relationHandler.ts` - Lógica de relaciones
+**`relationHandler.ts`** - Manejo de relaciones FK
 
-**Qué hace:** Maneja creación/edición/eliminación de relaciones entre tablas
-
-**Funciones:**
-
-- `determinePKFK(sourceTable, targetTable)` - Detecta qué tabla tiene PK y cuál FK
-- `createFKField(tableName, pkField, relationType)` - Crea FK con nombre `{tabla}_id`
-- `removeFKRelation(edges, fieldName)` - Elimina relación por nombre de campo FK
-- `updateFKRelation(edges, oldRef, newRef)` - Actualiza relación cuando cambia referencia
-
-**Dónde cambiar:**
-
-- **Naming de FKs:** Función `createFKField` línea ~25 template `${tabla}_${campo}`
-- **Validación de duplicados:** Línea ~30 verificación con `.find()`
-
-**Dependencias:** `@shared/types` (Field, TableData)
-
----
-
-#### `relationPrompt.ts` - Modal de tipo de relación
-
-**Qué hace:** Muestra modal SweetAlert2 para seleccionar tipo de relación (1-1, 1-N, N-N)
-
-**Función:** `showRelationTypePrompt()`
-
-- **Opciones:** "1-1", "1-N", "N-N" con ejemplos visuales
-- **Return:** Tipo seleccionado o null si cancela
-
-**Dónde cambiar:**
-
-- **Opciones de relación:** Línea ~15 objeto `inputOptions`
-- **Estilos del modal:** Línea ~20 `customClass` (dark mode)
-- **Colores:** Línea ~35 estilos CSS inline
-
-**Dependencias:** `sweetalert2`
-
----
-
-#### `relationStyles.ts` - Estilos de edges
-
-**Qué hace:** Define colores y estilos visuales para las relaciones (edges de ReactFlow)
+**Qué hace:** Detecta PK/FK automáticamente y gestiona creación/eliminación de relaciones
 
 **Funciones:**
 
-- `getEdgeStyle(type)` - Retorna estilo según tipo de relación
-- `defaultEdgeStyle` - Línea verde punteada por defecto
-- `selectedEdgeStyle` - Púrpura para selección
+- `determinePKFK(sourceTable, targetTable)` - Determina qué tabla lleva la FK
+  - Si ambas tienen PK: source es tabla referenciada, target lleva FK
+- `createFKField(fkTable, pkTable, relationType)` - Crea campo FK automático
+  - Nombre: `{tabla}_id` (ej: `usuario_id`)
+  - Evita duplicados comprobando referencias existentes
+- `removeFKRelation(nodeId, fieldName, edges, setEdges)` - Elimina edge relacionado
+- `updateFKRelation(nodeId, oldRef, newRef, ...)` - Actualiza referencia FK
+
+**Dónde cambiar:**
+
+- **Convención de nombres FK:** Línea ~73 template `${pkTable.data.name.toLowerCase()}_${pkField.name}`
+- **Validación de duplicados:** Línea ~59 condición `find()` con `references` y `referencesField`
+
+**Dependencias:** reactflow, @shared/types
+
+---
+
+**`relationPrompt.ts`** - Modal SweetAlert2 para tipo de relación
+
+**Qué hace:** Muestra modal estilizado para elegir 1-1, 1-N o N-N
+
+**Función:** `askRelationType()`
+
+- **Return:** `"1-1" | "1-N" | "N-N" | null`
+- **Ejemplos visuales:** Usuario–Perfil, Rol–Usuario, Estudiante–Curso
+
+**Dónde cambiar:**
+
+- **Opciones disponibles:** Línea 11 objeto `inputOptions`
+- **Colores del modal:** Línea 24 `confirmButtonColor: "#0984e3"`
+- **Tema:** Línea 26 `background: "#1e1e1e"` para dark mode
+- **Estilos del select:** Líneas 31-50 función `didOpen()`
+
+**Dependencias:** sweetalert2
+
+---
+
+**`relationStyles.ts`** - Estilos visuales de edges (ReactFlow)
+
+**Qué hace:** Define colores y animaciones para cada tipo de relación
+
+**Función:** `getEdgeStyle(type)`
 
 **Colores por tipo:**
 
-- **1-1:** Azul claro `#74b9ff`
-- **1-N:** Cyan `#00cec9`
-- **N-N:** Rojo `#ff7675`
-- **FK:** Verde `#00b894`
+- `1-1` → Azul `#74b9ff` (línea punteada animada)
+- `1-N` → Cyan `#00cec9` (línea punteada animada)
+- `N-N` → Rojo `#ff7675` (línea punteada gruesa, strokeWidth: 3)
+- `FK` → Verde `#00b894`
+
+**Estilos adicionales:**
+
+- `defaultEdgeStyle` - Verde con dash 5 5
+- `selectedEdgeStyle` - Púrpura `#667eea` con strokeWidth: 3
 
 **Dónde cambiar:**
 
-- **Colores de relaciones:** Función `getEdgeStyle` líneas 15-35
-- **Grosor de líneas:** Propiedad `strokeWidth` (default: 2)
-- **Animación:** Propiedad `animated: true/false`
+- **Colores:** Líneas 15-42 switch cases con `stroke` property
+- **Grosor:** Propiedad `strokeWidth` (default: 2, N-N: 3)
+- **Animación:** Línea ~18 `animated: true` - cambiar a false
+- **Patrón de línea:** `strokeDasharray: "5 5"` - cambiar números
 
 **Dependencias:** Ninguna (CSS puro)
 
 ---
 
-#### `sqlGenerator.ts` ⭐ - Generador de SQL
+**`sqlGenerator.ts`** ⭐ - Generador PostgreSQL
 
-**Qué hace:** Convierte diagrama ER a script PostgreSQL completo con CREATE TABLE
+**Qué hace:** Convierte diagrama ER a script SQL con ordenamiento de dependencias
 
-**Función principal:** `generateSQL(nodes, edges)`
+**Función:** `generateSQL(nodes, edges)`
 
-- **Algoritmo:** Ordenamiento topológico para resolver dependencias
-- **Detecta tablas intermedias:**
-  - **JOIN pura** (solo 2 FKs) → `PRIMARY KEY (fk1, fk2)` compuesta
-  - **JOIN extendida** (2 FKs + campos) → `id SERIAL PRIMARY KEY` normal
-- **Genera:** CREATE TABLE con constraints, FKs con `ON DELETE CASCADE`, índices
+**Algoritmo:**
 
-**Ejemplo generado:**
+1. Analiza todas las tablas con `classifyTable()` de relationUtils
+2. Separa tablas base (sin FK) vs dependientes (con FK)
+3. Crea tablas base primero
+4. Resuelve dependencias iterativamente (topological sort)
+5. Detecta dependencias circulares y advierte
 
-```sql
-CREATE TABLE usuario (
-  id SERIAL PRIMARY KEY,
-  nombre VARCHAR(100) NOT NULL,
-  email VARCHAR(100)
-);
+**Detección de tablas intermedias:**
 
-CREATE TABLE proyecto_etiqueta (
-  proyecto_id INT NOT NULL,
-  etiqueta_id INT NOT NULL,
-  PRIMARY KEY (proyecto_id, etiqueta_id),
-  FOREIGN KEY (proyecto_id) REFERENCES proyecto(id) ON DELETE CASCADE
-);
-```
+- **JOIN_PURE** (2 FKs, sin campos) → `PRIMARY KEY (fk1, fk2)` compuesta
+- **JOIN_ENRICHED** (2 FKs + campos) → `id SERIAL PRIMARY KEY`
+- **ENTITY** → `id SERIAL PRIMARY KEY`
 
 **Dónde cambiar:**
 
-- **Comportamiento CASCADE:** Buscar `ON DELETE CASCADE` → cambiar a `RESTRICT` o `SET NULL`
-- **Generar índices:** Comentar bloque `CREATE INDEX` si no los necesitas
-- **Normalización de nombres:** Función que convierte a snake_case
+- **ON DELETE:** Línea ~88 `ON DELETE CASCADE` → cambiar a `RESTRICT`, `SET NULL`
+- **Generar índices:** Agregar después de FK: `CREATE INDEX idx_name ON table(field);`
+- **Normalización:** Buscar `.toLowerCase().replace(/\s+/g, '_')` para cambiar formato
 
-**Dependencias:** `relationUtils.ts` (classifyTable)
+**Dependencias:** reactflow, @shared/types, relationUtils.ts
 
 ---
 
-#### `springBootGenerator.ts` ⭐ - Generador de Spring Boot
+**`springBootGenerator.ts`** ⭐ - Generador Spring Boot
 
-**Qué hace:** Genera proyecto Maven completo con JPA, Spring Boot 3.2, Docker
+**Qué hace:** Genera proyecto Maven completo con JPA + REST + Docker
 
-**Función principal:** `generateSpringBootProject(model, projectName)`
+**Función:** `generateSpringBootProject(model, projectName)`
 
-- **Genera:**
-  - pom.xml con dependencias (Spring Boot, JPA, H2, Lombok)
-  - Entidades JPA con `@Entity`, `@Data`, relaciones
-  - Repositories extendiendo `JpaRepository`
-  - Services con CRUD completo (findAll, findById, save, update, delete)
-  - Controllers REST con endpoints (GET, POST, PUT, DELETE)
-  - Dockerfile + docker-compose.yml
-- **Detección de tablas intermedias:**
-  - **JOIN pura** → `@ManyToMany` con `@JoinTable` (NO genera Entity separada)
-  - **JOIN extendida** → Entity completa con CRUD
+**Genera:**
+
+- `pom.xml` - Spring Boot 3.2.0, JPA, H2, Lombok
+- Entities - `@Entity`, `@Data`, `@Id`, `@GeneratedValue`
+- Repositories - `extends JpaRepository<Entity, Long>`
+- Services - CRUD completo (findAll, findById, save, delete)
+- Controllers - REST endpoints (`@GetMapping`, `@PostMapping`, etc.)
+- `Dockerfile` + `docker-compose.yml`
+- `README.md` con instrucciones
+
+**Detección de tablas intermedias:**
+
+- **JOIN_PURE** → `@ManyToMany` + `@JoinTable` (NO crea Entity separada)
+- **JOIN_ENRICHED** → Entity completa con `@IdClass` o `@EmbeddedId`
+- **ENTITY** → Entity estándar
 
 **Mapeo SQL → Java:**
 
 - `INT`, `SERIAL` → `Integer` | `BIGINT` → `Long`
-- `VARCHAR`, `TEXT` → `String` | `DECIMAL` → `BigDecimal`
+- `VARCHAR`, `TEXT` → `String` | `BOOLEAN` → `Boolean`
 - `DATE` → `LocalDate` | `TIMESTAMP` → `LocalDateTime`
-- `BOOLEAN` → `Boolean`
-
-**Endpoints generados:**
-
-- `GET /{entidad}` - Listar | `POST /{entidad}` - Crear
-- `PUT /{entidad}/{id}` - Actualizar | `DELETE /{entidad}/{id}` - Eliminar
+- `DECIMAL` → `BigDecimal`
 
 **Dónde cambiar:**
 
-- **Puerto:** Buscar rango `8180-9080` y modificar
-- **Base de datos:** Cambiar H2 por PostgreSQL en pom.xml (agregar dependency)
-- **Mapeo de tipos:** Función `mapSQLTypeToJava`
-- **Versión Spring Boot:** En pom.xml tag `<version>3.2.0</version>`
+- **Puerto:** Función `getAvailablePort()` línea 32 rango `8080 + (100-1100)`
+- **Base de datos:** En `application.properties` cambiar H2 por PostgreSQL
+- **Versión Spring Boot:** Línea ~180 en pom.xml `<version>3.2.0</version>`
+- **Mapeo de tipos:** Función `mapSqlToJavaType()` líneas 839-875
 
-**Dependencias:** `jszip`, `relationUtils.ts`
+**Dependencias:** jszip, reactflow, @shared/types, relationUtils.ts
 
 ---
 
-#### `flutterGenerator.ts` ⭐ - Generador de Flutter
+**`flutterGenerator.ts`** ⭐ - Generador Flutter
 
-**Qué hace:** Genera app Flutter completa con Provider, Material Design 3, CRUD
+**Qué hace:** Genera app Flutter completa con Provider + Material Design 3
 
-**Función principal:** `generateFlutterProject(model, projectName)`
+**Función:** `generateFlutterProject(model, projectName)`
 
-- **Genera:**
-  - pubspec.yaml con dependencias (provider, http)
-  - Modelos Dart con fromJson/toJson/copyWith
-  - API Service (modo mock o backend real)
-  - Providers con ChangeNotifier
-  - Screens (List + Form) por cada entidad
-  - Navigation Drawer automático
-- **Detección de tablas intermedias:**
-  - **JOIN pura** → NO genera código
-  - **JOIN extendida** → CRUD completo con composite key
+**Genera:**
 
-**Mapeo SQL → Dart:**
+- `pubspec.yaml` - provider ^6.1.0, http ^1.2.0
+- Models - Classes con `fromJson()`, `toJson()`, `copyWith()`
+- `api_service.dart` - Mock data + HTTP client configurable
+- Providers - `ChangeNotifier` con CRUD methods
+- Screens - List + Form por cada entidad
+- `main.dart` - Navigation con Drawer automático
 
-- `INT` → `int` (o `int?` si nullable)
-- `VARCHAR` → `String`
-- `BOOLEAN` → `bool`
-- `DATE`, `TIMESTAMP` → `DateTime`
-- `DECIMAL` → `double`
+**Detección de tablas intermedias:**
 
-**Configuración API:**
+- **JOIN_PURE** → NO genera código (relación manejada por entidades relacionadas)
+- **JOIN_ENRICHED** → CRUD completo con composite key
+- **ENTITY** → CRUD completo estándar
+
+**Configuración API (en api_service.dart generado):**
 
 ```dart
 static const bool useBackend = false; // true para backend real
 static const String baseUrl = "http://localhost:8080";
 ```
 
+**Mapeo SQL → Dart:**
+
+- `INT`, `SERIAL` → `int` (o `int?` si nullable)
+- `VARCHAR`, `TEXT` → `String` | `BOOLEAN` → `bool`
+- `DATE`, `TIMESTAMP` → `DateTime` | `DECIMAL` → `double`
+
 **Dónde cambiar:**
 
-- **URL del backend:** Buscar `baseUrl` en api_service.dart generado
-- **Datos mock:** Función `generateMockData` para cambiar datos de ejemplo
-- **Mapeo de tipos:** Función `mapSQLTypeToDart`
-- **Colores del tema:** En main.dart buscar `primarySwatch`
+- **Modo mock/backend:** En código generado línea ~12 `const bool useBackend`
+- **URL backend:** Línea ~13 `const String baseUrl`
+- **Datos mock:** Función `generateSampleData()` líneas 698-726
+- **Mapeo de tipos:** Función `mapSqlToDartType()` líneas 1326-1335
+- **Theme colors:** En main.dart generado buscar `primarySwatch`
 
-**Dependencias:** `jszip`, `relationUtils.ts`
+**Dependencias:** jszip, reactflow, @shared/types, relationUtils.ts
 
 ---
 
-#### `relationUtils.ts` ⭐⭐⭐ - Clasificación unificada
+**`relationUtils.ts`** ⭐⭐⭐ - Clasificación unificada de tablas
 
-**Qué hace:** Clasifica tablas de forma consistente para todos los generadores
+**Qué hace:** Single source of truth para clasificar tablas en TODOS los generadores
 
-**Tipos de tabla:**
+**Tipos de tabla (enum TableKind):**
 
-1. **ENTITY** - Tabla normal con datos propios
-2. **JOIN_PURE** - Tabla intermedia con SOLO 2 FKs
-3. **JOIN_ENRICHED** - Tabla intermedia con 2 FKs + campos adicionales
+1. **`ENTITY`** - Tabla normal con datos propios (0-N FKs)
+2. **`JOIN_PURE`** - Tabla intermedia N-M con SOLO 2 FKs (sin columnas adicionales)
+3. **`JOIN_ENRICHED`** - Tabla intermedia N-M con 2+ FKs + columnas adicionales
 
-**Función principal:** `classifyTable(fields)`
+**Funciones:**
 
-- **Detecta:** Cantidad de FKs, campos adicionales, timestamps
-- **Return:** `{ kind, foreignKeys, nonForeignFields, primaryKey }`
+- `classifyTable(fields)` - Clasifica tabla según estructura
+  - Detecta FKs, campos propios, timestamps opcionales
+  - Return: `{ kind, foreignKeys, nonForeignFields, primaryKey }`
+- `shouldGenerateCRUD(kind)` - Valida si genera CRUD
+  - ENTITY: ✅ SÍ | JOIN_PURE: ❌ NO | JOIN_ENRICHED: ✅ SÍ
+- `needsCompositeKey(classification)` - Determina si necesita PK compuesta
 
 **Impacto en generadores:**
 
-- **SQL:** JOIN_PURE → PK compuesta | JOIN_ENRICHED → id SERIAL
-- **Spring Boot:** JOIN_PURE → @ManyToMany | JOIN_ENRICHED → Entity
-- **Flutter:** JOIN_PURE → NO genera | JOIN_ENRICHED → CRUD con composite key
+| Tipo          | SQL                   | Spring Boot              | Flutter                |
+| ------------- | --------------------- | ------------------------ | ---------------------- |
+| ENTITY        | id SERIAL PRIMARY KEY | Entity + CRUD            | Models + CRUD          |
+| JOIN_PURE     | PK (fk1, fk2)         | @ManyToMany (sin Entity) | NO genera              |
+| JOIN_ENRICHED | id o PK compuesta     | Entity + @IdClass        | Models + composite key |
 
 **Dónde cambiar:**
 
-- **Ignorar timestamps:** Buscar array con `'created_at', 'updated_at'` si quieres que cuenten como campos
-- **Lógica de clasificación:** Función `classifyTable` para agregar nuevos tipos
-- **Detección de FKs:** Condición `field.name.endsWith('_id')` para cambiar convención
+- **Ignorar timestamps:** Líneas 42-46 array con `'created'`, `'updated'` - modificar o quitar
+- **Lógica de clasificación:** Función `classifyTable()` líneas 27-68 - agregar nuevos criterios
+- **Detección FK:** Línea 29 `f.isForeign` - cambiar si usas otra propiedad
 
-**Dependencias:** `@shared/types`
+**Dependencias:** @shared/types
 
 ---
 
@@ -2002,6 +2237,183 @@ static const String baseUrl = "http://localhost:8080";
 
 ---
 
+### 📦 Archivos Principales del Frontend
+
+**`packages/web/src/`**
+
+**`api.ts`** - Cliente HTTP con Axios
+
+**Qué hace:** Configura instancia de Axios con baseURL desde variables de entorno
+
+**Código completo (7 líneas):**
+
+```typescript
+import axios from "axios";
+
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:3001";
+
+export const api = axios.create({
+  baseURL: API_URL,
+});
+```
+
+**Uso:**
+
+```typescript
+import { api } from "@/api";
+
+const res = await api.post("/api/users/login", { email, name });
+const projects = await api.get(`/api/projects/${userId}`);
+```
+
+**Dónde cambiar:**
+
+- **URL default:** Línea 3 `"http://localhost:3001"` - cambiar puerto o dominio
+- **Timeout:** Agregar `timeout: 10000` en objeto de configuración línea 5
+- **Headers:** Agregar `headers: { "Content-Type": "application/json" }` en línea 6
+- **Interceptores:** Agregar después de línea 7 para auth tokens, error handling
+
+**Variable de entorno:** `VITE_API_URL` en `.env` del frontend
+
+**Dependencias:** axios
+
+---
+
+**`socketManager.ts`** - Gestor de conexiones Socket.IO
+
+**Qué hace:** Singleton pattern para manejar una única instancia de Socket.IO
+
+**Funciones:**
+
+- `getSocket(user)` - Obtiene o crea socket si hay usuario autenticado
+  - Configura auth: `{ userId, name }`
+  - Transport: WebSocket only (no polling)
+  - Listeners: connect, disconnect, error
+- `disconnectSocket()` - Cierra conexión y limpia instancia
+  - Llamar en logout o al salir del editor
+- `isSocketConnected()` - Verifica estado de conexión (boolean)
+
+**Logs automáticos:**
+
+- 🔌 Creating new socket connection for user
+- ✅ Socket connected: {socketId}
+- ❌ Socket disconnected
+- 🚨 Socket error: {error}
+
+**Dónde cambiar:**
+
+- **URL del socket:** Línea 3 `SOCKET_URL` desde `VITE_API_URL`
+- **Transport:** Línea 14 `transports: ["websocket"]` - agregar `"polling"` como fallback
+- **Auth data:** Líneas 15-18 objeto `auth` - agregar más campos
+- **Reconexión:** Agregar `reconnection: true, reconnectionAttempts: 5` en config
+
+**Patrón Singleton:** Solo una instancia global, reutilizada en toda la app
+
+**Dependencias:** socket.io-client
+
+---
+
+**`main.tsx`** - Punto de entrada de React
+
+**Qué hace:** Renderiza la aplicación con rutas y error boundary
+
+**Estructura:**
+
+```typescript
+<ErrorBoundary>
+  <BrowserRouter>
+    <Routes>
+      <Route path="/" element={<App />} />
+      <Route path="/dashboard" element={<App />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/project/:projectId" element={<DiagramEditor />} />
+      <Route path="/invite/:token" element={<AcceptInvite />} />
+    </Routes>
+  </BrowserRouter>
+</ErrorBoundary>
+```
+
+**Rutas definidas:**
+
+- `/` → App (redirige a dashboard o login según auth)
+- `/dashboard` → App (panel de proyectos)
+- `/login` → Login (autenticación)
+- `/project/:projectId` → DiagramEditor (editor colaborativo)
+- `/invite/:token` → AcceptInvite (procesamiento de invitaciones)
+
+**Dónde cambiar:**
+
+- **Agregar ruta:** Línea 15 añadir `<Route path="/nueva" element={<Nueva />} />`
+- **Layout wrapper:** Envolver Routes con layout personalizado
+- **Basename:** Agregar `<BrowserRouter basename="/app">` para subdirectorio
+
+**Dependencias:** react-router-dom, ErrorBoundary
+
+---
+
+**`App.tsx`** - Componente raíz con protección de rutas
+
+**Qué hace:** Maneja autenticación y redirecciones automáticas
+
+**Lógica de redirección:**
+
+1. **Si NO hay usuario:**
+   - Permite: `/login` y `/invite/:token`
+   - Redirige a `/login` en cualquier otra ruta
+2. **Si hay usuario:**
+   - En `/` → redirige a `/dashboard`
+   - Renderiza Dashboard con datos del usuario
+
+**useEffect hooks:**
+
+- **Hook 1 (líneas 11-14):** Logs de debugging (user, location)
+- **Hook 2 (líneas 16-31):** Lógica de redirección automática
+
+**Dónde cambiar:**
+
+- **Rutas públicas:** Línea 20 condición con excepciones de rutas sin auth
+- **Ruta default autenticado:** Línea 28 `navigate("/dashboard")` - cambiar destino
+- **Loading state:** Línea 36 `return null` - cambiar por spinner o skeleton
+
+**Dependencias:** react-router-dom, useAppStore
+
+---
+
+**`vite-env.d.ts`** - Tipos TypeScript para Vite
+
+**Qué hace:** Define tipos para variables de entorno de Vite
+
+**Interface:**
+
+```typescript
+interface ImportMetaEnv {
+  readonly VITE_API_URL: string;
+}
+```
+
+**Uso en código:**
+
+```typescript
+const apiUrl = import.meta.env.VITE_API_URL;
+```
+
+**Dónde cambiar:**
+
+- **Agregar variable:** Línea 4 añadir `readonly VITE_OTRA_VAR: string;`
+- **Tipos opcionales:** Cambiar `string` a `string | undefined` si es opcional
+
+**Archivo .env correspondiente:**
+
+```
+VITE_API_URL=http://localhost:3001
+```
+
+**Nota:** Variables VITE\_ son expuestas al cliente (no usar para secretos)
+
+**Dependencias:** Vite
+
+---
+
 ## 🏗️ Arquitectura de Coherencia entre Generadores
 
 ### Problema Resuelto
@@ -2337,81 +2749,236 @@ return { kind: "ENTITY" };
 
 ---
 
-### 🚀 Scripts y Herramientas
+### � Docker y Configuración de Deploy
 
-**`scripts/`**
+**Raíz del proyecto**
 
-**`deploy.sh`**
+**`.env`** - Variables de entorno para Docker Compose
 
-> Script automatizado de despliegue con Docker
+**Qué hace:** Define configuración de servicios (PostgreSQL, servidor, OpenAI)
 
-- Limpieza completa: detiene contenedores, elimina volúmenes y limpia sistema Docker
-- Build completo sin caché (`--no-cache`) para asegurar imagen actualizada
-- Levanta servicios en modo detached (`-d`)
-- Muestra estado final de servicios con `docker compose ps`
-- **Uso:** `bash scripts/deploy.sh`
-- **⚠️ Advertencia:** Elimina volúmenes, se perderán datos de base de datos
+**Variables definidas:**
+
+- `POSTGRES_USER` - Usuario de PostgreSQL (default: postgres)
+- `POSTGRES_PASSWORD` - Contraseña de PostgreSQL (default: postgres)
+- `POSTGRES_DB` - Nombre de base de datos (default: diagram_editor)
+- `PORT` - Puerto del servidor Express (default: 3001)
+- `OPENAI_API_KEY` - API key para GPT-4o-mini
+
+**Dónde cambiar:**
+
+- **Puerto servidor:** Línea 7 `PORT=3001` → cambiar si 3001 está ocupado
+- **Credenciales DB:** Líneas 4-6 para cambiar usuario/password/nombre de BD
+- **API Key OpenAI:** Línea 10 reemplazar con tu propia key desde platform.openai.com
+
+**⚠️ Seguridad:** Este archivo NO debe subirse a Git (está en .gitignore)
 
 ---
 
-### 🐳 Configuración Docker y Deploy
+**`.env.example`** - Plantilla pública de variables de entorno
 
-**Raíz del proyecto:**
+**Qué hace:** Template para que otros desarrolladores sepan qué variables configurar
 
-**`.env.example`**
+**Estructura:**
 
-> Plantilla de variables de entorno globales
+```
+PORT=3001
+POSTGRES_USER=postgres
+POSTGRES_PASSWORD=postgres
+POSTGRES_DB=diagram_editor
+POSTGRES_HOST=db
+POSTGRES_PORT=5432
+```
 
-- `PORT=3001` - Puerto del servidor
-- Credenciales PostgreSQL (POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB)
-- HOST y PORT de base de datos
+**Dónde cambiar:**
 
-**`.gitignore`**
+- **Agregar nueva variable:** Añadir línea sin valor real (ej: `OPENAI_API_KEY=tu_key_aqui`)
+- **Documentar:** Agregar comentarios para variables no obvias
 
-> Archivos ignorados por Git
+**Uso:** `cp .env.example .env` y luego editar .env con valores reales
 
-- node_modules, dist, build
-- Variables de entorno (.env\*)
-- Logs y archivos temporales
-- Carpeta `data/` (volúmenes Docker)
-- IDE configs (.vscode, .idea)
+---
 
-**`docker-compose.yml`** ⭐
+**`.gitignore`** - Archivos excluidos del control de versiones
 
-> Orquestación de servicios con Docker Compose
+**Qué hace:** Previene que archivos sensibles o generados se suban a Git
 
-- **Servicio `db`:**
-  - PostgreSQL 15
-  - Puerto 5432 expuesto
-  - Volumen persistente en `./data/postgres`
-  - Healthcheck cada 5s con `pg_isready`
-- **Servicio `app`:**
-  - Depende de `db` (espera healthcheck)
-  - Puerto 3001 expuesto
-  - Variables de entorno inyectadas
-  - Comando: `node packages/server/dist/index.js`
+**Categorías ignoradas:**
 
-**`Dockerfile`** ⭐
+**Dependencies:**
 
-> Build multi-stage optimizado
+- `node_modules/` - Dependencias npm (se instalan con package.json)
+- `.pnpm-store/` - Caché de pnpm
 
-- **Stage 1 (webbuild):** Compila React con Vite
-- **Stage 2 (serverbuild):** Compila TypeScript server, genera Prisma client
-- **Stage 3 (runtime):**
-  - Alpine Linux (imagen ligera ~50MB)
-  - Instala OpenSSL para Prisma
-  - Copia solo archivos necesarios (dist, node_modules producción)
-  - Expone puerto 3001
-- **Optimización:** Solo dependencias de producción, sin devDependencies
+**Build outputs:**
 
-**`package.json`** (Raíz)
+- `dist/`, `build/` - Archivos compilados
+- `*.tsbuildinfo` - Caché de TypeScript
 
-> Configuración de monorepo con workspaces
+**Environment:**
 
-- Workspaces: `packages/*` (server, web, shared)
-- Scripts npm:
-  - `dev:server` - Ejecuta servidor en modo desarrollo
-  - `dev:web` - Ejecuta frontend con Vite
-  - `build` - Compila ambos proyectos
+- `.env`, `.env.local`, `.env.production` - Variables de entorno con secretos
+
+**Logs:**
+
+- `logs/`, `*.log`, `npm-debug.log*` - Archivos de log
+
+**OS:**
+
+- `.DS_Store` (macOS), `Thumbs.db` (Windows)
+
+**IDE:**
+
+- `.vscode/`, `.idea/`, `*.swp`, `*.swo`
+
+**Docker:**
+
+- `data/` - Volúmenes persistentes de Docker (BD PostgreSQL)
+
+**Misc:**
+
+- `coverage/`, `.cache/`
+
+**Dónde cambiar:**
+
+- **Ignorar carpeta adicional:** Agregar línea con path (ej: `uploads/`)
+- **Permitir archivo específico:** Usar `!archivo.txt` para excepción
+
+---
+
+**`docker-compose.yml`** - Orquestación multi-contenedor
+
+**Qué hace:** Define y conecta servicios PostgreSQL + Express en red interna Docker
+
+**Servicios:**
+
+**1. `db` (PostgreSQL 15):**
+
+- **Imagen:** `postgres:15`
+- **Environment:** Lee desde .env con fallbacks (:-postgres)
+- **Puerto:** `5432:5432` (host:container)
+- **Volumen:** `./data/postgres:/var/lib/postgresql/data` (persistencia)
+- **Healthcheck:** `pg_isready` cada 5s, 10 reintentos (50s timeout total)
+
+**2. `app` (Express + React):**
+
+- **Build:** Usa Dockerfile del root
+- **Depends on:** Espera a que `db` pase healthcheck antes de iniciar
+- **Environment:**
+  - `PORT` desde .env
+  - `DATABASE_URL` construido dinámicamente: `postgresql://user:pass@db:5432/dbname?schema=public`
+  - `OPENAI_API_KEY` desde .env
+- **Puerto:** `3001:3001`
+- **Command:** `node packages/server/dist/index.js`
+
+**Dónde cambiar:**
+
+- **Puerto servidor:** Línea 22 `"3001:3001"` → cambiar primer número para host
+- **Puerto BD:** Línea 9 `"5432:5432"` → cambiar primer número para exponer en host
+- **Healthcheck timeout:** Línea 14 `interval: 5s` → ajustar frecuencia
+- **Agregar servicio:** Añadir bloque `servicename:` después de línea 23
+
+**Comandos:**
+
+- Iniciar: `docker compose up -d`
+- Ver logs: `docker compose logs -f app`
+- Detener: `docker compose down`
+- Limpiar volúmenes: `docker compose down -v` ⚠️ BORRA DATOS
+
+**Dependencias:** Docker 20.10+, Docker Compose v2
+
+---
+
+**`Dockerfile`** - Build multi-stage optimizado para producción
+
+**Qué hace:** Compila frontend + backend y genera imagen Docker ligera (<100MB)
+
+**Stage 1: `webbuild` (Node 18 Alpine)**
+
+- **Líneas 2-8:** Compila React con Vite
+- **Input:** `packages/web/`
+- **Output:** `packages/web/dist/` (HTML, CSS, JS optimizados)
+- **Instala:** patch-package globalmente
+- **Comando:** `npm run build` en packages/web
+
+**Stage 2: `serverbuild` (Node 18 Alpine)**
+
+- **Líneas 10-15:** Compila TypeScript y genera Prisma Client
+- **Input:** `packages/server/`
+- **Output:** `packages/server/dist/` (JavaScript compilado)
+- **Comandos:** `npx prisma generate` + `npm run build`
+
+**Stage 3: `runtime` (Node 18 Alpine - producción)**
+
+- **Líneas 17-33:** Imagen final ligera con solo archivos necesarios
+- **Optimizaciones:**
+  - Alpine Linux (base ~5MB vs Ubuntu ~70MB)
+  - Solo production dependencies (`--omit=dev`)
+  - OpenSSL instalado para Prisma Client
+  - Multi-stage descarta archivos temporales de build
+- **Estructura copiada:**
+  - `packages/server/dist/` (código compilado)
+  - `packages/server/package.json` (para npm install)
+  - `packages/server/prisma/` (schema para migraciones)
+  - `packages/web/dist/` (frontend estático)
+- **Variables:** `NODE_ENV=production`
+- **Puerto:** 3001
+- **Entrypoint:** `node packages/server/dist/index.js`
+
+**Dónde cambiar:**
+
+- **Node version:** Líneas 2, 10, 17 `node:18-alpine` → cambiar a node:20-alpine
+- **Puerto expuesto:** Línea 32 `EXPOSE 3001` → cambiar número
+- **Optimización adicional:** Línea 29 agregar `RUN npm prune --production` después de install
+- **Dependencias sistema:** Línea 22 `apk add` → agregar más paquetes (ej: curl, git)
+
+**Tamaño estimado:** ~80-100MB (vs ~500MB sin multi-stage)
+
+**Comandos:**
+
+- Build: `docker build -t exam2-app .`
+- Run: `docker run -p 3001:3001 exam2-app`
+
+**Dependencias:** Docker 20.10+
+
+---
+
+**`package.json`** (Root) - Configuración del monorepo
+
+**Qué hace:** Define workspaces npm para gestión unificada de dependencias
+
+**Propiedades:**
+
+- **name:** `Exam_2_sw`
+- **version:** `0.1.0`
+- **private:** `true` (no publicable en npm)
+- **workspaces:** `["packages/*"]` (incluye server, web, shared)
+
+**Scripts:**
+
+- `dev:server` - Ejecuta `npm run dev` en @exam2/server
+- `dev:web` - Ejecuta `npm run dev` en @exam2/web
+- `build` - Compila server + web en secuencia
+
+**Ventajas de workspaces:**
+
+- ✅ Un solo `node_modules` en root (ahorra espacio)
+- ✅ Dependencias compartidas hoisted
+- ✅ `npm install` en root instala todos los workspaces
+- ✅ Scripts cross-workspace con `--workspace` flag
+
+**Dónde cambiar:**
+
+- **Agregar workspace:** Línea 6 añadir `"packages/mobile"` al array
+- **Agregar script:** Líneas 8-10 añadir `"test": "npm run test --workspaces"`
+- **Cambiar nombre:** Línea 2 modificar identificador del proyecto
+
+**Comandos útiles:**
+
+- Instalar todo: `npm install`
+- Agregar dep a server: `npm install express --workspace=@exam2/server`
+- Ejecutar script en todos: `npm run build --workspaces`
+
+**Dependencias:** npm 7+ (workspaces disponibles desde v7)
 
 ---
