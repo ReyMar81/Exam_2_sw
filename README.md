@@ -32,7 +32,7 @@ Herramienta integral para acelerar el desarrollo de sistemas de gestión mediant
 - **Colaboración Real:** Múltiples usuarios editando simultáneamente con roles (OWNER/EDITOR/VIEWER)
 - **Sincronización Instantánea:** Cambios propagados en < 100ms vía WebSocket
 - **Generación Inteligente:** Del diagrama a código funcional listo para producción
-- **IA Integrada:** ✅ Prompts de texto en lenguaje natural | ⏳ Reconocimiento de voz e imágenes (en desarrollo)
+- **IA Integrada Completa:** ✅ Texto 📝 + Voz 🎤 + Imagen 📷 para crear diagramas en lenguaje natural
 - **Ligero:** Optimizado para AWS t2.micro (1GB RAM, 1 vCPU)
 
 ---
@@ -198,12 +198,36 @@ Herramienta integral para acelerar el desarrollo de sistemas de gestión mediant
     - "Relación 1 a muchos entre cliente y pedido"
     - "Crea una relación muchos a muchos entre persona y perfil con campos fecha_creacion y activo"
     - "Agrega campo telefono VARCHAR(20) a tabla usuario"
+- [x] **Análisis de Imágenes con IA** ✅ IMPLEMENTADO
+  - **Reconocimiento visual de diagramas ER mediante GPT-4o-mini Vision**
+  - Subida de imágenes (JPG/PNG) desde el editor
+  - **Optimización automática:**
+    - Redimensionamiento a 1200px máximo (manteniendo proporciones)
+    - Compresión JPEG con calidad 0.8 (equilibrio legibilidad/costo)
+    - Conversión a Base64 para envío
+  - **Detección inteligente:**
+    - Identificación de tablas/entidades
+    - Extracción de campos con tipos de datos inferidos
+    - Detección de relaciones (1-1, 1-N, N-N) según notación visual
+  - **Integración frontend:**
+    - Botón 📷 en `AIPromptBar` para subir imágenes
+    - Función `resizeAndCompressImage()` con Canvas API
+    - Spinner de carga durante procesamiento
+    - Mensajes de error específicos
+  - **Endpoint backend:** `POST /api/ai/parse-image`
+    - Validación de tamaño (máx 5MB después de compresión)
+    - System prompt especializado para análisis visual
+    - Retorna acciones JSON compatibles con `applyAIActions()`
+  - **Flujo unificado:** Texto 📝 + Voz 🎤 + Imagen 📷 usan el mismo sistema de acciones
+  - **Testing recomendado:**
+    - Screenshots de diagramas ER de otros software (Lucidchart, draw.io, MySQL Workbench)
+    - Fotos de diagramas en pizarra o papel
+    - Diagramas con notaciones Crow's Foot o Chen
+  - **Compatibilidad:** Todos los navegadores modernos (Canvas API estándar)
 
 ### ⏳ Pendiente de Implementación
 
-- [ ] **Diseño Asistido por IA (Restante)**
-  - Reconocimiento de voz para creación de tablas (Web Speech API)
-  - OCR/Visión por computadora para replicar diagramas desde imágenes (GPT-4 Vision)
+- [ ] **Diseño Asistido por IA (Mejoras futuras)**
   - Sugerencias inteligentes de relaciones basadas en contexto
   - Auto-completado de campos comunes (createdAt, updatedAt, etc.)
 
@@ -308,54 +332,362 @@ EXAM_2_SW/
 
 **`packages/server/prisma/schema.prisma`**
 
-> Define la estructura de la base de datos y las relaciones entre tablas
+> **Tecnología:** Prisma ORM + PostgreSQL 15  
+> **Propósito:** Define estructura de BD, genera cliente TypeScript, crea migraciones SQL
 
-- **User** - Gestión de usuarios del sistema (email único, autenticación)
-- **Project** - Proyectos contenedores de diagramas (permisos públicos/privados)
-- **ProjectUser** - Control de acceso por proyecto con roles (OWNER, EDITOR, VIEWER)
-- **Diagram** - Diagramas individuales con datos JSON y versionamiento
-- **Session** - Seguimiento de usuarios activos en diagramas (presencia en tiempo real)
-- **Lock** - Sistema de bloqueos optimistas con TTL para edición colaborativa
-- **DiagramChange** - Auditoría completa de cambios (historial y rollback)
-- **Invitation** - Sistema de invitaciones por email con tokens únicos
+**Comandos:** `npx prisma generate` | `npx prisma migrate dev` | `npx prisma studio`
+
+#### Diagrama ER del Sistema
+
+```
+┌─────────────┐         ┌──────────────┐         ┌─────────────┐
+│    User     │────1:N──│ ProjectUser  │──N:1────│   Project   │
+│             │         │              │         │             │
+│ id (PK)     │         │ userId (FK)  │         │ id (PK)     │
+│ email (UK)  │         │ projectId(FK)│         │ name        │
+│ name        │         │ role (ENUM)  │         │ ownerId(FK) │
+└─────┬───────┘         └──────────────┘         └──────┬──────┘
+      │                                                   │
+      │ 1:N                                           1:N │
+      │                  ┌──────────────┐                │
+      └──────────────────│   Diagram    │────────────────┘
+      │                  │              │
+      │                  │ id (PK)      │
+      │                  │ projectId(FK)│
+      │                  │ authorId (FK)│
+      │                  │ data (JSON)  │◄── nodes/edges del canvas
+      │                  │ version (INT)│
+      │                  └───┬──────────┘
+      │                      │
+      │        ┌─────────────┼─────────────┬─────────────┐
+      │        │             │             │             │
+      │     1:N│          1:N│          1:N│          1:N│
+      │        │             │             │             │
+  ┌───▼────────▼───┐  ┌─────▼──────┐  ┌──▼────────────┐ │
+  │    Session     │  │    Lock    │  │DiagramChange  │ │
+  │                │  │            │  │               │ │
+  │ userId (FK)    │  │ userId(FK) │  │ userId (FK)   │ │
+  │ diagramId (FK) │  │ diagram(FK)│  │ diagram (FK)  │ │
+  │ lastPing       │  │ resourceId │  │ action        │ │
+  │ startedAt      │  │ expiresAt  │  │ payload(JSON) │ │
+  └────────────────┘  └────────────┘  └───────────────┘ │
+                                                         │
+                      ┌──────────────┐                   │
+                      │  Invitation  │──────────N:1──────┘
+                      │              │
+                      │ projectId(FK)│
+                      │ token (UK)   │◄── Link reutilizable
+                      │ role (ENUM)  │
+                      └──────────────┘
+```
+
+#### Modelos y Funciones Principales
+
+**User** - Usuarios del sistema con email único
+
+- `findUnique({ where: { email } })` - Buscar por email en login usando `@prisma/client`
+- `create({ data: { email, name } })` - Registrar usuario nuevo
+- **Archivos:** `routes/users.ts`, `index.ts`
+
+**Project** - Contenedor de diagramas con permisos
+
+- `findMany({ where: { ownerId } })` - Listar proyectos usando `@prisma/client`
+- `create({ data: { name, ownerId } })` - Crear proyecto
+- **Archivos:** `routes/projects.ts`, `Dashboard.tsx`
+
+**ProjectUser** - Roles de colaboradores (OWNER/EDITOR/VIEWER)
+
+- `findFirst({ where: { userId, projectId } })` - Verificar permisos con `@prisma/client`
+- `create({ data: { userId, projectId, role } })` - Asignar rol
+- **Archivos:** `index.ts` (validación Socket.IO)
+
+**Diagram** ⭐ - Almacena diagrama ER completo en JSON
+
+- `update({ data: { data, version: { increment: 1 } } })` - Guardar cambios con `@prisma/client`
+- `findFirst({ where: { projectId } })` - Cargar diagrama
+- **Campo crítico:** `data` contiene `{ nodes: [...], edges: [...] }` del ReactFlow canvas
+- **Archivos:** `routes/diagrams.ts`, `DiagramEditor.tsx`, `index.ts`
+
+**Session** - Presencia en tiempo real (quién está activo)
+
+- `upsert({ update: { lastPing } })` - Actualizar heartbeat cada 30s con `@prisma/client`
+- `findMany({ where: { lastPing: { gte: hace60s } } })` - Obtener usuarios activos
+- **Archivos:** `routes/sessions.ts`, `index.ts`
+
+**Lock** - Bloqueos optimistas TTL 30s
+
+- `create({ data: { diagramId, resourceId, expiresAt } })` - Adquirir lock con `@prisma/client`
+- `delete({ where: { diagramId_resourceId } })` - Liberar
+- **Archivos:** `routes/locks.ts`
+
+**DiagramChange** - Auditoría de cambios
+
+- `create({ data: { action, payload } })` - Registrar cambio usando `@prisma/client`
+- `findMany({ take: 50, orderBy: { createdAt: 'desc' } })` - Últimos 50 cambios
+- **Archivos:** `routes/changes.ts`, `index.ts`
+
+**Invitation** - Tokens de invitación reutilizables
+
+- `create({ data: { projectId, token, role } })` - Generar invitación con `@prisma/client`
+- `findUnique({ where: { token } })` - Validar token
+- **Archivos:** `routes/invitations.ts`, `AcceptInvite.tsx`
 
 ---
 
 ### 🛣️ Rutas del Backend (API REST)
 
-**`packages/server/src/routes/`**
+**`packages/server/src/routes/`** - Endpoints HTTP para operaciones CRUD y servicios
 
-**`changes.ts`**
+#### `ai.ts` 🧠 - Integración con OpenAI para IA
 
-> Registro de auditoría para cambios en diagramas
+**Qué hace:** Procesa prompts de texto y análisis de imágenes con GPT-4o-mini para generar diagramas
 
-- `POST /api/changes/add` - Guardar cambio en el historial (acción + payload)
-- `GET /api/changes/:diagramId` - Obtener últimos 50 cambios de un diagrama
+**Endpoints:**
 
-**`ai.ts`** 🧠
+- `POST /api/ai/parse-intent` - Convierte texto natural a acciones de diagrama
+  - **Body:** `{ prompt: string, projectId?: string, userId?: string }`
+  - **Ejemplo:** `"Crea tabla usuario con id, nombre, email"` → `[{type: "CreateTable", name: "usuario", fields: [...]}]`
+  - **Límites:** 500 caracteres máximo, valida con `if (prompt.length > 500)`
+  - **Cambiar límite:** Línea ~45 `if (prompt.length > 500)` → modificar número
+- `POST /api/ai/parse-image` 📷 - Analiza imagen de diagrama ER
+  - **Body:** `{ imageBase64: string, projectId?: string, userId?: string }`
+  - **Límites:** 5MB máximo, valida con `(imageBase64.length * 0.75) / (1024 * 1024)`
+  - **Cambiar límite:** Línea ~170 `if (sizeInMB > 5)` → modificar número
+- `GET /api/ai/health` - Verifica configuración de OpenAI
+  - **Response:** `{ status: "configured", apiKey: "sk-xxx...", model: "gpt-4o-mini" }`
 
-> Endpoints de integración con IA para generación automática de diagramas
+**Dónde cambiar:**
 
-- `POST /api/ai/parse-intent` - Parsear prompt de texto natural y generar acciones JSON
-  - **Request body:** `{ prompt: string }` (máximo 500 caracteres)
-  - **Response:** `{ actions: AIAction[] }` - Array de acciones estructuradas
-  - **Acciones soportadas:** CreateTable, CreateRelation, AddField, RenameTable, DeleteTable, DeleteRelation
+- **Límite de caracteres:** Línea 45 variable `500`
+- **Límite de imagen:** Línea 170 variable `5` (MB)
+- **Modelo de IA:** En `aiService.ts` no aquí
+- **Validaciones:** Bloque try-catch líneas 26-115
+
+**Dependencias:** `express`, `aiService.ts` (parseUserIntent, parseImageIntent, validateActions)
+
+---
+
+#### `changes.ts` - Auditoría de cambios en diagramas
+
+**Qué hace:** Registra historial completo de modificaciones para rollback y auditoría
+
+**Endpoints:**
+
+- `POST /api/changes/add` - Guardar cambio en historial
+  - **Body:** `{ diagramId: string, userId: string, action: string, payload: any }`
+  - **Ejemplo:** `action: "ADD_NODE"`, `payload: { id: "node-123", data: {...} }`
+- `GET /api/changes/:diagramId` - Últimos 50 cambios
+  - **Response:** Array ordenado por fecha DESC con datos de usuario
+  - **Cambiar límite:** Línea 31 `take: 50` → modificar número
+
+**Dónde cambiar:**
+
+- **Cantidad de cambios retornados:** Línea 31 `take: 50`
+- **Ordenamiento:** Línea 30 `orderBy: { createdAt: "desc" }` → cambiar a `"asc"`
+
+**Dependencias:** `@prisma/client`, `ensureUserExists.ts`
+
+---
+
+#### `diagrams.ts` - CRUD de diagramas ER
+
+**Qué hace:** Guarda y carga el estado completo del canvas (nodes + edges) en JSON
+
+**Endpoints:**
+
+- `POST /api/diagrams/:projectId` - Guardar/actualizar diagrama
+  - **Body:** `{ data: { nodes: [], edges: [] }, userId: string }`
+  - **Auto-incrementa versión:** `version: { increment: 1 }`
+  - **Crea si no existe:** Nombre por defecto `"Auto Diagram"`
+  - **Cambiar nombre default:** Línea 51 `name: "Auto Diagram"`
+- `GET /api/diagrams/:projectId` - Cargar diagrama
+  - **Response:** `{ id, projectId, data, version, createdAt, updatedAt }`
+  - **Si no existe:** Retorna `{ data: { nodes: [], edges: [] } }`
+- `GET /api/diagrams/single/:projectId` - Alias para compatibilidad
+
+**Dónde cambiar:**
+
+- **Nombre de diagrama nuevo:** Línea 51 `name: "Auto Diagram"`
+- **Respuesta cuando no existe:** Línea 76 objeto `{ nodes: [], edges: [] }`
+- **Auto-versionado:** Línea 43 `version: { increment: 1 }` → quitar si no quieres versión
+
+**Dependencias:** `@prisma/client`
+
+---
+
+#### `invitations.ts` - Sistema de invitaciones reutilizables
+
+**Qué hace:** Genera links de invitación compartibles para unirse a proyectos
+
+**Endpoints:**
+
+- `POST /api/invitations/create` - Crear token de invitación
+  - **Body:** `{ projectId: string, role?: Role }`
+  - **Genera token:** 16 bytes aleatorios con `crypto.randomBytes(16)`
+  - **Rol por defecto:** `"EDITOR"` si no se especifica
+  - **Cambiar rol default:** Línea 21 `role: role || "EDITOR"`
+  - **URL generada:** `http://localhost:3001/invite/{token}`
+  - **Cambiar URL base:** Línea 27 modificar dominio
+- `GET /api/invitations/:token` - Validar token
+  - **Response:** `{ id, projectId, role, token, project: {...} }`
+- `POST /api/invitations/accept` - Aceptar invitación
+  - **Body:** `{ token: string, userId: string }`
+  - **Reutilizable:** NO marca `acceptedAt` para permitir múltiples usos
+
+**Dónde cambiar:**
+
+- **Rol por defecto:** Línea 21 `"EDITOR"` → `"VIEWER"` o `"OWNER"`
+- **Longitud del token:** Línea 19 `randomBytes(16)` → modificar número
+- **URL del frontend:** Línea 27 cambiar `localhost:3001`
+- **Hacer token de un solo uso:** Descomentar actualización de `acceptedAt` después de línea 93
+
+**Dependencias:** `@prisma/client`, `crypto` (Node.js built-in)
+
+---
+
+#### `locks.ts` - Bloqueos optimistas para edición
+
+**Qué hace:** Previene conflictos cuando múltiples usuarios editan mismo elemento
+
+**Endpoints:**
+
+- `POST /api/locks/acquire` - Adquirir lock
+  - **Body:** `{ diagramId: string, userId: string, resourceId: string }`
+  - **TTL:** 30 segundos (`Date.now() + 30000`)
+  - **Auto-renueva:** Si ya existe lock del mismo usuario lo actualiza
+  - **Cambiar TTL:** Línea 12 `30000` milisegundos
+- `POST /api/locks/release` - Liberar lock
+  - **Body:** `{ lockId: string }`
+
+**Dónde cambiar:**
+
+- **Tiempo de expiración:** Línea 12 `30000` (30s) → `60000` (60s)
+- **Comportamiento de renovación:** Línea 16-18 bloque `upsert`
+
+**Dependencias:** `@prisma/client`, `ensureUserExists.ts`
+
+---
+
+#### `projects.ts` - Gestión de proyectos
+
+**Qué hace:** CRUD de proyectos y verificación de roles de usuarios
+
+**Endpoints:**
+
+- `GET /api/projects/:userId` - Listar proyectos del usuario
+  - **Incluye:** Proyectos donde es owner O colaborador
+  - **Response:** Array con `users[]`, `diagrams[]` incluidos
+- `POST /api/projects` - Crear proyecto
+  - **Body:** `{ name: string, userId: string }`
+  - **Auto-asigna:** Rol `OWNER` al creador
+- `GET /api/projects/role/:projectId?userId=` - Verificar rol
+  - **Query param:** `userId` requerido
+  - **Response:** `{ role: "OWNER" | "EDITOR" | "VIEWER" | null }`
+
+**Dónde cambiar:**
+
+- **Rol inicial del creador:** Línea 41 `role: "OWNER"` → cambiar si quieres otro rol
+- **Campos incluidos en listado:** Líneas 16-18 bloque `include`
+- **Validación de campos requeridos:** Línea 36 condición `if (!name || !userId)`
+
+**Dependencias:** `@prisma/client`
+
+---
+
+#### `sessions.ts` - Presencia en tiempo real
+
+**Qué hace:** Rastrea quién está activo en cada diagrama (heartbeat)
+
+**Endpoints:**
+
+- `POST /api/sessions/open` - Abrir sesión
+  - **Body:** `{ userId: string, diagramId: string }`
+  - **Crea registro:** Con `startedAt` automático
+- `POST /api/sessions/close` - Cerrar sesión
+  - **Body:** `{ sessionId: string }`
+  - **Marca:** `endedAt: new Date()`
+- `GET /api/sessions/active/:diagramId` - Usuarios activos
+  - **Filtros:** `endedAt: null` y `lastPing > hace 60s`
+  - **Cambiar umbral:** Línea 42 `60000` milisegundos
+  - **Response:** Array con datos de `user` incluidos
+
+**Dónde cambiar:**
+
+- **Tiempo de inactividad:** Línea 42 `60000` (60s) → `120000` (120s)
+- **Filtros de usuarios activos:** Línea 39-41 bloque `where`
+
+**Dependencias:** `@prisma/client`, `ensureUserExists.ts`
+
+---
+
+#### `users.ts` - Autenticación simple
+
+**Qué hace:** Login/registro sin contraseña basado solo en email
+
+**Endpoints:**
+
+- `POST /api/users/login` - Login o crear usuario
+  - **Body:** `{ email: string, name: string }`
+  - **Auto-registro:** Si email no existe lo crea automáticamente
+  - **Sin validación de email:** Acepta cualquier formato
+  - **Response:** `{ id, email, name, createdAt }`
+
+**Dónde cambiar:**
+
+- **Agregar validación de email:** Después de línea 11 agregar regex
+- **Requerir contraseña:** Modificar modelo `User` en Prisma y agregar campo
+- **Validación de campos:** Línea 11 condición `if (!email || !name)`
+
+**Dependencias:** `@prisma/client`
+
+---
+
+- **Response:** `{ actions: AIAction[] }` - Array de acciones estructuradas
+- **Acciones soportadas:** CreateTable, CreateRelation, AddField, RenameTable, DeleteTable, DeleteRelation
+- **Validaciones:**
+  - Prompt no vacío
+  - Longitud máxima 500 caracteres
+  - JSON válido en respuesta
+  - Schema de acciones correcto
+- **Manejo de errores:**
+  - 400: Prompt inválido o vacío
+  - 401: API key de OpenAI inválida
+  - 429: Rate limit excedido
+  - 500: Error de parseo o respuesta inválida
+- **Integración:** OpenAI GPT-4o-mini con system prompt de 180+ líneas
+- **Características:**
+  - Inferencia automática de tipos SQL
+  - Detección de cardinalidades (1-1, 1-N, N-N)
+  - Manejo especial de relaciones muchos-a-muchos
+  - Validación de estructura JSON estricta
+- `POST /api/ai/parse-image` - Analizar imagen de diagrama ER con IA Vision 📷
+  - **Request body:** `{ imageBase64: string }` (imagen en Base64 puro, sin prefijo)
+  - **Response:** `{ actions: AIAction[], metadata: { imageSizeMB, actionsCount } }`
   - **Validaciones:**
-    - Prompt no vacío
-    - Longitud máxima 500 caracteres
+    - ImageBase64 no vacío
+    - Tamaño máximo 5MB después de compresión
     - JSON válido en respuesta
     - Schema de acciones correcto
   - **Manejo de errores:**
-    - 400: Prompt inválido o vacío
+    - 400: Imagen inválida, vacía o muy grande
     - 401: API key de OpenAI inválida
     - 429: Rate limit excedido
-    - 500: Error de parseo o respuesta inválida
-  - **Integración:** OpenAI GPT-4o-mini con system prompt de 180+ líneas
+    - 500: Error de análisis visual o respuesta inválida
+  - **Integración:** OpenAI GPT-4o-mini Vision con system prompt especializado
   - **Características:**
-    - Inferencia automática de tipos SQL
-    - Detección de cardinalidades (1-1, 1-N, N-N)
-    - Manejo especial de relaciones muchos-a-muchos
-    - Validación de estructura JSON estricta
+    - Detección de tablas/entidades desde imagen
+    - Extracción de campos con tipos inferidos
+    - Reconocimiento de relaciones visuales (Crow's Foot, Chen, etc.)
+    - Inferencia automática de cardinalidades según notación
+    - Tolerancia a imágenes borrosas o con ruido
+  - **Optimización frontend:**
+    - Redimensionamiento automático a 1200px
+    - Compresión JPEG calidad 0.8
+    - Conversión a Base64 con Canvas API
+  - **Testing recomendado:**
+    - Screenshots de Lucidchart, draw.io, MySQL Workbench
+    - Fotos de diagramas en pizarra
+    - Bocetos escaneados
 - `GET /api/ai/health` - Health check del servicio de IA
   - **Response:** `{ status: "ok", hasApiKey: boolean, keyPreview: string }`
   - **Uso:** Verificar configuración de `OPENAI_API_KEY` en variables de entorno
@@ -407,180 +739,317 @@ EXAM_2_SW/
 
 ---
 
-### 🔧 Utilidades y Servicios del Backend
+### 🔧 Servicios del Backend
 
-**`packages/server/src/services/`**
+**`packages/server/src/services/aiService.ts`** 🧠 - Integración con OpenAI
 
-**`aiService.ts`** 🧠⭐
+**Qué hace:** Procesa prompts de texto e imágenes con GPT-4o-mini y convierte a acciones estructuradas JSON
 
-> Servicio de integración con OpenAI API para procesamiento de lenguaje natural
+**Funciones principales:**
 
-- **Función principal:** `parseUserIntent(prompt: string): Promise<{ actions: AIAction[] }>`
-  - Envía prompt a GPT-4o-mini con system prompt especializado
-  - Retorna array de acciones estructuradas en JSON
-  - Validación automática de respuestas
-  - Manejo de errores específicos de OpenAI
-- **Configuración:**
-  - Modelo: `gpt-4o-mini` (optimizado costo/rendimiento)
-  - Temperature: `0.3` (balance creatividad/precisión)
-  - Response format: `json_object` (respuestas JSON estrictas)
-  - Timeout implícito: 30s (OpenAI SDK default)
-- **System Prompt (180+ líneas):**
-  - Reglas generales de formato JSON
-  - Definiciones de 6 tipos de acciones (CreateTable, CreateRelation, AddField, etc.)
-  - Reglas de inferencia de tipos SQL desde texto natural
-  - Detección automática de cardinalidades
-  - **Reglas especiales para relaciones N-N:**
-    - No crear tabla intermedia con CreateTable (el sistema lo hace automáticamente)
-    - Devolver CreateRelation con cardinality MANY_TO_MANY
-    - Si hay atributos adicionales, usar AddField con targetTable inferida
-    - Si hay nombre personalizado, usar RenameTable antes de AddField
-  - 8+ ejemplos completos con casos de uso reales
-  - Mapeo de tipos: email→VARCHAR(100), edad→INT, precio→DECIMAL(10,2), etc.
-- **Tipos exportados:**
-  ```typescript
-  type AIAction =
-    | { type: "CreateTable"; name: string; fields: AIField[] }
-    | {
-        type: "CreateRelation";
-        fromTable: string;
-        toTable: string;
-        cardinality: "ONE_TO_ONE" | "ONE_TO_MANY" | "MANY_TO_MANY";
+**`parseUserIntent(prompt: string)`** - Analizar texto natural
+
+- **Input:** Prompt en lenguaje natural (ej: "Crea tabla usuario con id, nombre, email")
+- **Output:** `{ actions: AIAction[] }` con acciones CreateTable, CreateRelation, AddField, etc.
+- **Ejemplo respuesta:**
+  ```json
+  {
+    "actions": [
+      {
+        "type": "CreateTable",
+        "name": "usuario",
+        "fields": [
+          { "name": "id", "type": "SERIAL", "isPrimary": true },
+          { "name": "nombre", "type": "VARCHAR(100)" },
+          { "name": "email", "type": "VARCHAR(100)" }
+        ]
       }
-    | {
-        type: "AddField";
-        tableName?: string;
-        targetTable?: string;
-        field?: AIField;
-        fields?: AIField[];
-      }
-    | { type: "RenameTable"; oldName: string; newName: string }
-    | { type: "DeleteTable"; name: string }
-    | { type: "DeleteRelation"; fromTable: string; toTable: string };
+    ]
+  }
   ```
-- **Función auxiliar:** `validateActions(actions: AIAction[]): { valid: boolean; errors: string[] }`
-  - Valida estructura y campos requeridos de cada acción
-  - Detecta tipos de acción desconocidos
-  - Retorna lista de errores descriptivos
-- **Logs detallados:**
-  - Emoji coding: 🧠 [AI], ✅, ❌, ⚠️
-  - Preview de prompts (primeros 100 chars)
-  - Tiempo de respuesta en ms
-  - Conteo de acciones generadas
-- **Manejo de errores:**
-  - `invalid_api_key`: API key incorrecta o faltante
-  - `rate_limit` (429): Límite de requests excedido
-  - Respuestas vacías o JSON inválido
-  - Acciones con schema incorrecto
-- **Variables de entorno requeridas:**
-  - `OPENAI_API_KEY` - API key de OpenAI (obligatoria)
 
-**`packages/server/src/utils/`**
+**`parseImageIntent(imageBase64: string)`** 📷 - Analizar imágenes de diagramas
 
-**`ensureUserExists.ts`**
+- **Input:** Imagen en Base64 (sin prefijo `data:image/`)
+- **Output:** Mismo formato que `parseUserIntent`
+- **Detecta:** Tablas, campos, tipos, relaciones desde screenshots o fotos
 
-> Función helper para garantizar integridad referencial de usuarios
+**`validateActions(actions: AIAction[])`** - Validar estructura
 
-- Verifica si un userId existe en la base de datos
-- Si no existe, crea un usuario placeholder automáticamente (email: `{userId}@auto.local`)
-- Usado en `changes.ts`, `locks.ts` y `sessions.ts` para evitar errores de FK
+- **Valida:** Campos requeridos, tipos correctos, cardinalidades válidas
+- **Normaliza:** `MANY_TO_ONE` → `ONE_TO_MANY`, `TO_ONE` → `ONE_TO_ONE`
+- **Output:** `{ valid: boolean, errors: string[] }`
+
+**`cleanDuplicateFKs(actions: AIAction[])`** 🧹 - Limpiar duplicados
+
+- **Elimina:** Campos con nombres idénticos en CreateTable
+- **Normaliza:** FKs con tipo SERIAL → INT (solo PKs deben ser SERIAL)
+
+**`normalizeIntermediateTables(actions: AIAction[])`** 🧹 - Limpiar tablas intermedias
+
+- **Detecta:** Tablas N-N automáticas (con guion bajo)
+- **Elimina:** FKs redundantes que el sistema crea automáticamente
+
+**Configuración de IA:**
+
+- **Modelo:** `gpt-4o-mini` (línea 236 en código)
+- **Temperature:** `0.3` (línea 237 - creatividad baja para precisión)
+- **Response format:** `json_object` (línea 238 - fuerza JSON válido)
+
+**Dónde cambiar:**
+
+- **Modelo de IA:** Línea 236 `model: "gpt-4o-mini"` → `"gpt-4o"` (más preciso pero caro)
+- **Temperature:** Línea 237 `temperature: 0.3` → `0.7` (más creativo) o `0.0` (determinístico)
+- **Timeout:** Agregar `timeout: 30000` después de línea 238
+- **System prompt texto:** Líneas 55-212 (SYSTEM_PROMPT) - agregar/modificar reglas de inferencia
+- **System prompt imagen:** Líneas 296-376 (IMAGE_SYSTEM_PROMPT) - cambiar instrucciones de visión
+- **Mapeo de tipos SQL:** En system prompt líneas 130-140 (email→VARCHAR, edad→INT, etc.)
+- **Validaciones custom:** Función `validateActions` líneas 403-473
+
+**Tipos de acciones soportadas:**
+
+1. **CreateTable** - Crear tabla con campos
+2. **CreateRelation** - Relacionar dos tablas (ONE_TO_ONE, ONE_TO_MANY, MANY_TO_MANY)
+3. **AddField** - Agregar campo(s) a tabla existente
+4. **DeleteTable** - Eliminar tabla
+5. **RenameTable** - Renombrar tabla (oldName → newName)
+6. **DeleteRelation** - Eliminar relación entre tablas
+
+**Variables de entorno:**
+
+- `OPENAI_API_KEY` - API key de OpenAI (obligatoria)
+- Obtener en: https://platform.openai.com/api-keys
+
+**Manejo de errores:**
+
+- `invalid_api_key` → "Invalid OpenAI API key" (código 401)
+- `status 429` → "Rate limit exceeded" (demasiadas peticiones)
+- JSON inválido → "Invalid response format"
+- Validación fallida → Array de errores específicos
+
+**Dependencias:** `openai` (SDK oficial 4.73.0+)
+
+---
+
+**`packages/server/src/utils/ensureUserExists.ts`** - Helper de usuarios
+
+**Qué hace:** Garantiza que un userId existe antes de crear registros relacionados
+
+**Función:** `ensureUserExists(userId: string)`
+
+- **Busca:** Usuario en base de datos por ID
+- **Si no existe:** Crea usuario placeholder con email `{userId}@auto.local`
+- **Evita:** Errores de foreign key en Session, Lock, DiagramChange
+
+**Dónde se usa:** `changes.ts`, `locks.ts`, `sessions.ts` (antes de crear registros)
+
+**Dependencias:** `@prisma/client`
 
 ---
 
 ### ⚡ Servidor Principal
 
-**`packages/server/src/index.ts`**
+**`packages/server/src/index.ts`** - Express + Socket.IO + Prisma
 
-> Punto de entrada que integra Express + Socket.IO + Prisma para colaboración en tiempo real
+**Qué hace:** Punto de entrada que integra API REST y WebSocket para colaboración en tiempo real
 
-**Configuración:**
+#### Configuración inicial
 
-- Express con CORS, Helmet y JSON parser
-- Socket.IO con CORS habilitado para todos los orígenes
-- Prisma Client para acceso a base de datos
-- Servidor HTTP compartido para REST + WebSocket
+**Express:**
 
-**Endpoints REST:**
+- Middleware: `cors()`, `helmet()`, `express.json({ limit: '10mb' })`
+- Puerto: `process.env.PORT || 3001`
 
-- `GET /health` - Health check básico
-- `GET /dbcheck` - Verificar conexión a DB y listar usuarios
-- Monta todas las rutas bajo `/api/*`:
-  - `/api/sessions` - Control de presencia
-  - `/api/locks` - Bloqueos distribuidos
-  - `/api/changes` - Auditoría de cambios
-  - `/api/users` - Autenticación
-  - `/api/projects` - Gestión de proyectos
-  - `/api/invitations` - Sistema de invitaciones
-  - `/api/diagrams` - CRUD de diagramas
-  - `/api/ai` - 🧠 Endpoints de IA (parse-intent, health)
-- Sirve frontend estático desde `/app/packages/web/dist`
-- Catch-all route para SPA routing (React Router)
+**Socket.IO:**
 
-**Eventos WebSocket (Socket.IO):**
+- CORS: `{ origin: "*" }` (todos los orígenes permitidos)
+- Sistema de presencia: `io.presence` (Map en memoria)
 
-_Colaboración por Proyecto (Principal):_
+**Prisma:**
 
-- `join-project` - Usuario se une a proyecto, obtiene rol y emite presencia
-- `ping-diagram` - Mantener presencia activa (heartbeat cada 30s)
-- `leave-project` - Salir manualmente del proyecto
-- `diagram-change` - Enviar cambios incrementales (ADD_NODE, UPDATE_NODE, DELETE_NODE, ADD_EDGE, etc.)
-  - Valida rol (VIEWER no puede editar)
-  - Persiste cambios en DB automáticamente
-  - Broadcast a otros usuarios del proyecto (excepto emisor)
+- Cliente único compartido: `new PrismaClient()`
 
-_Legacy (Compatibilidad):_
+#### Endpoints REST
 
-- `join-diagram`, `leave-diagram`, `lock-acquire`, `lock-release`
+- `GET /health` - Health check simple `{ status: "ok" }`
+- `GET /dbcheck` - Verifica conexión a BD y lista usuarios
+- **Rutas montadas:**
+  - `/api/sessions`, `/api/locks`, `/api/changes`
+  - `/api/users`, `/api/projects`, `/api/invitations`
+  - `/api/diagrams`, `/api/ai` 🧠
+- **Frontend estático:** Sirve desde `/app/packages/web/dist`
+- **Catch-all:** `app.get("*")` para SPA routing (React Router)
 
-**Características:**
+#### Eventos Socket.IO principales
 
-- Sistema de presencia en memoria (`io.presence` Map)
-- Limpieza automática de usuarios inactivos cada 60s
-- Manejo global de errores (uncaughtException, unhandledRejection)
-- Logs detallados con emojis para debugging
+**`join-project`** - Usuario se conecta a proyecto
+
+- **Payload:** `{ userId, projectId, name, role }`
+- **Acciones:**
+  - Verifica que userId/projectId existan
+  - Llama `socket.join(projectId)` para unir a room
+  - Crea usuario placeholder si no existe (excepto guests)
+  - Obtiene rol desde BD (o VIEWER por defecto)
+  - Guarda `socket.data = { userId, projectId, role, name }`
+  - Agrega a `io.presence` Map con timestamp
+  - Emite `presence-update` a todos en el proyecto
+- **Dónde cambiar:**
+  - Validación de guests: Línea ~105 condición `userId.startsWith("guest_")`
+  - Rol por defecto: Línea ~123 `effectiveRole = "VIEWER"`
+
+**`diagram-change`** - Cambio en diagrama (ADD_NODE, UPDATE_NODE, DELETE_NODE, etc.)
+
+- **Payload:** `{ projectId, action, payload }`
+- **Validaciones:**
+  - Requiere autenticación (userId y projectId en socket.data)
+  - VIEWER no puede modificar (línea ~215)
+- **Acciones:**
+  - Emite `diagram-update` a otros usuarios: `socket.to(projectId).emit()`
+  - Persiste en BD aplicando cambio incremental
+  - **Acciones soportadas:**
+    - `ADD_NODE` - Agrega nodo (evita duplicados)
+    - `UPDATE_NODE` - Actualiza todos los campos del nodo
+    - `MOVE_NODE` - Solo actualiza posición (optimizado)
+    - `DELETE_NODE` - Elimina nodo
+    - `ADD_EDGE` - Agrega relación
+    - `DELETE_EDGE` - Elimina relación
+    - `SYNC_EDGES` - Reemplaza todas las relaciones
+  - Auto-incrementa versión del diagrama
+- **Dónde cambiar:**
+  - Validación de VIEWER: Línea ~215 condición `role === "VIEWER"`
+  - Lógica de persistencia: Bloque switch líneas ~230-280
+
+**`ping-diagram`** - Heartbeat para mantener presencia
+
+- **Payload:** `{ projectId, userId }`
+- **Actualiza:** `lastPing` del usuario en `io.presence` Map
+
+**`leave-project`** - Usuario sale del proyecto
+
+- **Payload:** `{ projectId, userId }`
+- **Elimina:** Usuario de `io.presence` y emite `presence-update`
+
+**`disconnect`** - Desconexión automática
+
+- **Limpia:** Usuario de `io.presence` del proyecto actual
+
+#### Eventos legacy (compatibilidad)
+
+- `join-diagram`, `leave-diagram` - Versión anterior basada en diagramId
+- `lock-acquire`, `lock-release` - Bloqueos directos via Socket.IO
+
+#### Características adicionales
+
+**Sistema de presencia:**
+
+- `io.presence` Map: `projectId → Array<{ userId, name, role, socketId, lastPing }>`
+- Limpieza automática cada 60s (usuarios con lastPing > 60s atrás)
+- Emite `presence-update` cuando cambia lista
+
+**Manejo de errores:**
+
+- `app.use()` - Error handler global
+- `process.on("uncaughtException")` - Captura errores no manejados
+- `process.on("unhandledRejection")` - Captura promesas rechazadas
+
+**Logging:**
+
+- Emojis: 🔌 (conexión), ✅ (éxito), ❌ (error), ⚠️ (advertencia), 💾 (guardado)
+- Logs detallados de cada acción de Socket.IO
+
+#### Dónde cambiar
+
+- **Puerto del servidor:** Línea final `PORT || 3001`
+- **Límite de JSON:** Línea ~28 `express.json({ limit: '10mb' })`
+- **CORS origins:** Línea ~26 `cors({ origin: "*" })` → especificar dominio
+- **Tiempo de inactividad:** Línea ~434 `60000` (60s) para limpieza
+- **TTL de presencia:** Línea ~171 y ~434 umbral de `60000` ms
+- **Path del frontend:** Línea ~77 `/app/packages/web/dist`
+- **Validación de VIEWER:** Línea ~215 para permitir/denegar acciones
+
+**Dependencias:** `express`, `socket.io`, `@prisma/client`, `cors`, `helmet`
 
 ---
 
 ### ⚙️ Configuración del Servidor
 
-**`packages/server/.env`**
+**`packages/server/.env`** - Variables de entorno (NO commitear)
 
-> Variables de entorno para el servidor (no commitear)
+**Variables:**
+- `PORT=3001` - Puerto del servidor
+- `DATABASE_URL="postgresql://postgres:postgres@db:5432/diagram_editor"` - Conexión a PostgreSQL
+  - Host `db` para Docker
+  - Host `localhost` para desarrollo local
+- `OPENAI_API_KEY="sk-proj-..."` 🧠 - API key de OpenAI (obligatoria para IA)
 
-- `PORT=3001` - Puerto del servidor Express
-- `DATABASE_URL` - Conexión a PostgreSQL (host: `db` en Docker, `localhost` en local)
-- `OPENAI_API_KEY` - 🧠 API key de OpenAI para integración de IA (requerida para funcionalidades de IA)
+**Dónde cambiar:**
+- Puerto: Modificar valor de `PORT`
+- Base de datos: Cambiar host `db` → `localhost` si no usas Docker
+- API key: Obtener en https://platform.openai.com/api-keys
 
-**`packages/server/.env.example`**
+---
 
-> Plantilla de variables de entorno para desarrollo
+**`packages/server/.env.example`** - Template de variables de entorno
 
-- Incluye ejemplos para Docker y desarrollo local
-- Template de `OPENAI_API_KEY` con instrucciones de obtención
+**Qué hace:** Plantilla para crear tu propio `.env` sin exponer secretos
 
-**`packages/server/package.json`**
+**Contenido:**
+```
+PORT=3001
+DATABASE_URL="postgresql://postgres:postgres@db:5432/diagram_editor?schema=public"
+# Comentario: usar 'db' en Docker, 'localhost' en local
+```
 
-> Dependencias y scripts del servidor
+**Uso:** `cp .env.example .env` y completar con valores reales
 
-- **Scripts:**
-  - `dev` - Desarrollo con hot-reload (ts-node-dev)
-  - `build` - Compilar TypeScript a JavaScript
-  - `start` - Ejecutar servidor compilado
-  - `prisma:generate` - Generar cliente Prisma
-  - `prisma:migrate` - Crear migración inicial
-- **Dependencias principales:**
-  - Express, Prisma Client, Socket.IO, CORS, Helmet, dotenv
-  - **openai** 4.73.0+ - 🧠 SDK oficial de OpenAI para Node.js
-- **Dev dependencies:** TypeScript, ts-node-dev, tipos para Node/Express
+---
 
-**`packages/server/tsconfig.json`**
+**`packages/server/package.json`** - Dependencias y scripts
 
-> Configuración de TypeScript para el servidor
+**Scripts:**
+- `npm run dev` - Desarrollo con hot-reload (ts-node-dev)
+- `npm run build` - Compilar TypeScript → JavaScript en `dist/`
+- `npm start` - Ejecutar servidor compilado
+- `npm run prisma:generate` - Generar cliente Prisma después de cambios en schema
+- `npm run prisma:migrate` - Crear migración de BD
 
-- Target: ES2020 con módulos ES2020
-- Module resolution: Bundler
-- Output: `dist/` desde `src/`
-- Strict mode habilitado
+**Dependencias principales:**
+- `express` ^4.19.2 - Framework web
+- `socket.io` ^4.8.1 - WebSocket
+- `@prisma/client` ^5.20.0 - ORM
+- `cors` ^2.8.5 - CORS middleware
+- `helmet` ^7.1.0 - Seguridad headers
+- `openai` ^4.73.0 - SDK de OpenAI 🧠
+- `dotenv` ^16.4.5 - Variables de entorno
+
+**Dev dependencies:**
+- `typescript` ^5.6.3, `prisma` ^5.20.0, `ts-node-dev` ^2.0.0
+- Tipos: `@types/express`, `@types/cors`, `@types/node`
+
+**Dónde cambiar:**
+- Versiones: Modificar números de versión y ejecutar `npm install`
+- Scripts: Agregar/modificar comandos personalizados
+
+---
+
+**`packages/server/tsconfig.json`** - Configuración de TypeScript
+
+**Qué hace:** Define cómo compilar TypeScript a JavaScript
+
+**Configuración clave:**
+- `target: "ES2020"` - Versión de JavaScript objetivo
+- `module: "ES2020"` - Sistema de módulos (import/export)
+- `moduleResolution: "Bundler"` - Resolución para bundlers modernos
+- `outDir: "dist"` - Carpeta de salida compilada
+- `rootDir: "src"` - Carpeta de código fuente
+- `strict: true` - Modo estricto (type-safety máximo)
+- `paths: { "@shared/*": ["../shared/*"] }` - Alias para imports compartidos
+
+**Dónde cambiar:**
+- Target JS: `ES2020` → `ES2022` para features más nuevas
+- Strict mode: `strict: false` si quieres validación relajada
+- Output: `outDir: "build"` para cambiar carpeta de compilación
+- Aliases: Agregar más paths para imports personalizados
 
 ---
 
@@ -636,50 +1105,102 @@ _Legacy (Compatibilidad):_
 
 **`AIPromptBar.tsx`** 🧠⭐
 
-> Barra flotante de prompts IA con diseño glassmorphism en footer del editor
+> Barra compacta tipo ChatGPT con IA multimodal: texto 📝 + voz 🎤 + imagen 📷
 
 - **Interfaz de usuario:**
-  - Input de texto con placeholder descriptivo y límite de 500 caracteres
-  - Contador de caracteres en tiempo real (ej: "0/500")
-  - Botón "Generar" con gradiente morado (#667eea → #764ba2)
-  - Spinner de loading durante procesamiento
-  - Mensajes de error inline (no alerts) con estilo rojo
-  - Lista de ejemplos de uso como referencia rápida
-  - Diseño glassmorphism con backdrop-filter blur y fondo semi-transparente
+  - Diseño compacto horizontal (~50-70px altura) con layout tipo ChatGPT
+  - Input de texto flex con placeholder dinámico y límite de 500 caracteres
+  - Contador de caracteres en tiempo real (rojo cuando >450 chars)
+  - **Botón cámara 📷:** Analizar imágenes de diagramas ER
+    - Abre selector de archivos (accept: image/\*)
+    - Redimensiona automáticamente a 1200px máximo
+    - Comprime con calidad 0.8 (JPEG)
+    - Valida tamaño (máx 10MB antes de comprimir)
+    - Convierte a Base64 y envía a `/api/ai/parse-image`
+    - Usa Canvas API (sin dependencias externas)
+  - **Botón micrófono 🎤:** Reconocimiento de voz con Web Speech API (español)
+    - Solo visible si el navegador soporta Web Speech API (Chrome/Edge)
+    - Cambia a 🔴 durante grabación activa
+    - Placeholder dinámico: "🎤 Escuchando..." mientras graba
+    - Transcripción automática al input (editable antes de enviar)
+    - Detección automática de fin de frase (continuous: false)
+  - Botón "✨ Generar" con gradiente morado (#667eea → #764ba2)
+  - Spinner de loading inline durante procesamiento
+  - Mensajes de error flotantes encima de la barra (auto-desaparecen en 3-5s)
+  - Ayuda contextual compacta con atajos de teclado solo cuando input vacío
+  - Fondo oscuro (#1c1c1c) con border radius 24px
 - **Funcionalidad:**
-  - Envía prompt a endpoint `/api/ai/parse-intent` vía POST
-  - Validación local de longitud (máx 500 chars) antes de enviar
+  - **Análisis de imágenes (Canvas API + GPT-4o-mini Vision):**
+    - Función `resizeAndCompressImage(file, maxSize=1200, quality=0.8)`
+    - Calcula escala manteniendo proporciones
+    - Dibuja en canvas temporal y comprime
+    - Extrae Base64 puro (sin prefijo data:image)
+    - Logs detallados: 📷 [Image] con tamaño en KB
+    - Endpoint: `POST /api/ai/parse-image`
+  - **Reconocimiento de voz (Web Speech API):**
+    - Idioma: español (es-ES)
+    - Modo: no continuo (se detiene al finalizar frase)
+    - Sin resultados intermedios (solo transcripción final)
+    - Manejo de errores con logs detallados (🎤 [Voice])
+    - Estado isRecording para feedback visual
+    - Auto-detección de soporte del navegador
+  - **Procesamiento de texto:**
+    - Envía prompt a endpoint `/api/ai/parse-intent` vía POST
+    - Validación local de longitud (máx 500 chars) antes de enviar
   - Callback `onActionsReceived(actions)` para aplicar acciones en editor
-  - Manejo de estados: normal, loading, error
+  - Manejo de estados: normal, loading, recording, error
   - Limpia input después de éxito
   - Control de acceso: solo visible para OWNER/EDITOR (no VIEWER/GUEST)
+  - Atajos de teclado: Enter para enviar (sin Shift)
 - **Props:**
   - `projectId: string` - ID del proyecto actual
   - `userId: string` - ID del usuario (para logs y auditoría)
   - `onActionsReceived: (actions: any[]) => void` - Callback para aplicar acciones
 - **Integración con DiagramEditor:**
   - Renderizado condicional: `{!isViewer && !isGuest && <AIPromptBar />}`
-  - Posicionado en footer con `position: fixed; bottom: 0`
+  - Posicionado en footer con `position: fixed; bottom: 16px`
   - Conectado con función `applyAIActions()` para ejecución de acciones
   - Sincronización automática vía Socket.IO después de aplicar
 - **Estilos:**
-  - Ancho: 60% de la pantalla (centrado)
-  - Altura fija: ~100px con padding generoso
-  - Border radius: 16px con sombra elegante
-  - Gradiente de fondo: rgba(17, 25, 40, 0.85)
-  - Efectos hover: translateY(-2px) y sombra más pronunciada
-  - Responsive: se adapta a diferentes tamaños de pantalla
-- **Ejemplos integrados:**
+  - Max-width: 800px (centrado horizontalmente)
+  - Altura: ~50-70px (compacta, deja más espacio al diagrama)
+  - Border radius: 24px con sombra oscura
+  - Fondo: #1c1c1c (dark solid, sin glassmorphism)
+  - Layout: horizontal con input flex:1, botones a la derecha (📷 🎤 ✨)
+  - Responsive: padding adaptativo según ancho de pantalla
+- **Compatibilidad:**
+  - **Análisis de imágenes:** ✅ Todos los navegadores (Canvas API estándar)
+  - **Web Speech API:** ✅ Chrome/Edge | ✅ Safari (webkit) | ❌ Firefox (botón oculto)
+- **Ejemplos de uso por texto:**
   - "Crea una tabla cliente con id, nombre, email, teléfono"
   - "Relación 1 a muchos entre cliente y pedido"
   - "Crea una relación muchos a muchos entre persona y perfil"
   - "Agrega campo telefono VARCHAR(20) a tabla usuario"
+- **Ejemplos de uso por voz (español):**
+  - 🎤 "Crea tabla usuario con id nombre email contraseña"
+  - 🎤 "Agrega campo teléfono a tabla cliente"
+  - 🎤 "Relación uno a muchos entre cliente y pedido"
+- **Ejemplos de uso por imagen:**
+  - 📷 Screenshot de diagrama de Lucidchart
+  - 📷 Foto de diagrama en pizarra
+  - 📷 Diagrama exportado de MySQL Workbench
+  - 📷 Boceto en papel escaneado con notación Crow's Foot
 - **Manejo de errores:**
   - API key inválida: "Error: Invalid OpenAI API key"
   - Rate limit: "Rate limit exceeded. Please try again later"
   - Prompt vacío: "Por favor ingresa un prompt"
   - Prompt muy largo: "El prompt no puede exceder 500 caracteres"
   - Error de red: "Error al procesar el prompt"
+  - **Errores de voz:**
+    - Sin soporte: Botón oculto automáticamente
+    - Sin permisos: "Error de voz: not-allowed"
+    - Sin audio: "Error de voz: no-speech"
+    - Error de red: "Error de voz: network"
+  - **Errores de imagen:**
+    - Archivo inválido: "Por favor selecciona un archivo de imagen válido"
+    - Tamaño excesivo: "La imagen es muy grande. Tamaño máximo: 10MB"
+    - Sin detecciones: "No se detectaron tablas o relaciones en la imagen"
+    - Error de procesamiento: "Error al analizar la imagen"
 
 ---
 
@@ -870,55 +1391,227 @@ _Legacy (Compatibilidad):_
 
 ### 🛠️ Utilidades del Frontend
 
-**`packages/web/src/utils/`**
+**`packages/web/src/utils/`** - Helpers, generadores y lógica de UI
 
-**`relationHandler.ts`**
+#### `relationHandler.ts` - Lógica de relaciones
 
-> Lógica de negocio para manejo de relaciones entre tablas
+**Qué hace:** Maneja creación/edición/eliminación de relaciones entre tablas
 
-- **Funciones principales:**
-  - `determinePKFK()` - Detecta automáticamente qué tabla debe tener PK y cuál FK en una relación
-    - Prioriza tabla con PK existente
-    - Si ambas tienen PK, source es PK por defecto (lógica 1-N)
-  - `createFKField()` - Crea campo FK automáticamente en tabla foránea
-    - Nombra FK como `{tabla}_{campo_pk}` (ej: `usuario_id`)
-    - Evita duplicados verificando existencia previa
-    - Soporta tipo de relación (1-1, 1-N, N-N)
-  - `removeFKRelation()` - Elimina edge asociado a campo FK específico
-  - `removeRelationByReference()` - Elimina todas las relaciones entre dos tablas
-  - `updateFKRelation()` - Actualiza relación cuando cambia tabla referenciada
-- Interfaces completas: `Field`, `TableData`
+**Funciones:**
 
-**`relationPrompt.ts`**
+- `determinePKFK(sourceTable, targetTable)` - Detecta qué tabla tiene PK y cuál FK
+- `createFKField(tableName, pkField, relationType)` - Crea FK con nombre `{tabla}_id`
+- `removeFKRelation(edges, fieldName)` - Elimina relación por nombre de campo FK
+- `updateFKRelation(edges, oldRef, newRef)` - Actualiza relación cuando cambia referencia
 
-> Modal interactivo para seleccionar tipo de relación
+**Dónde cambiar:**
 
-- Usa SweetAlert2 para UI atractiva
-- Opciones: 1-1, 1-N, N-N con ejemplos y descripciones
-- Styling dark mode personalizado
-- Aplica estilos dinámicos al select después del render
-- Retorna tipo seleccionado o null si cancela
+- **Naming de FKs:** Función `createFKField` línea ~25 template `${tabla}_${campo}`
+- **Validación de duplicados:** Línea ~30 verificación con `.find()`
 
-**`relationStyles.ts`**
+**Dependencias:** `@shared/types` (Field, TableData)
 
-> Definición de estilos visuales para edges de ReactFlow
+---
 
-- `defaultEdgeStyle` - Estilo base con línea verde punteada
-- `getEdgeStyle(type)` - Retorna estilo según tipo de relación:
-  - **1-1**: Azul claro (`#74b9ff`) con animación
-  - **1-N**: Cyan (`#00cec9`) con animación
-  - **N-N**: Rojo (`#ff7675`) con línea más gruesa
-  - **FK**: Verde (`#00b894`) genérico
-- `selectedEdgeStyle` - Púrpura (`#667eea`) para resaltar selección
-- Todos con `strokeDasharray` para efecto punteado
-- Labels con background oscuro semi-transparente
+#### `relationPrompt.ts` - Modal de tipo de relación
 
-**`sqlGenerator.ts`** ⭐
+**Qué hace:** Muestra modal SweetAlert2 para seleccionar tipo de relación (1-1, 1-N, N-N)
 
-> Generador automático de scripts SQL optimizados desde diagrama ER con detección inteligente de tablas intermedias
+**Función:** `showRelationTypePrompt()`
 
-- **Funciones principales:**
-  - `generateSQL(nodes, edges)` - Crea script SQL completo con ordenamiento inteligente:
+- **Opciones:** "1-1", "1-N", "N-N" con ejemplos visuales
+- **Return:** Tipo seleccionado o null si cancela
+
+**Dónde cambiar:**
+
+- **Opciones de relación:** Línea ~15 objeto `inputOptions`
+- **Estilos del modal:** Línea ~20 `customClass` (dark mode)
+- **Colores:** Línea ~35 estilos CSS inline
+
+**Dependencias:** `sweetalert2`
+
+---
+
+#### `relationStyles.ts` - Estilos de edges
+
+**Qué hace:** Define colores y estilos visuales para las relaciones (edges de ReactFlow)
+
+**Funciones:**
+
+- `getEdgeStyle(type)` - Retorna estilo según tipo de relación
+- `defaultEdgeStyle` - Línea verde punteada por defecto
+- `selectedEdgeStyle` - Púrpura para selección
+
+**Colores por tipo:**
+
+- **1-1:** Azul claro `#74b9ff`
+- **1-N:** Cyan `#00cec9`
+- **N-N:** Rojo `#ff7675`
+- **FK:** Verde `#00b894`
+
+**Dónde cambiar:**
+
+- **Colores de relaciones:** Función `getEdgeStyle` líneas 15-35
+- **Grosor de líneas:** Propiedad `strokeWidth` (default: 2)
+- **Animación:** Propiedad `animated: true/false`
+
+**Dependencias:** Ninguna (CSS puro)
+
+---
+
+#### `sqlGenerator.ts` ⭐ - Generador de SQL
+
+**Qué hace:** Convierte diagrama ER a script PostgreSQL completo con CREATE TABLE
+
+**Función principal:** `generateSQL(nodes, edges)`
+
+- **Algoritmo:** Ordenamiento topológico para resolver dependencias
+- **Detecta tablas intermedias:**
+  - **JOIN pura** (solo 2 FKs) → `PRIMARY KEY (fk1, fk2)` compuesta
+  - **JOIN extendida** (2 FKs + campos) → `id SERIAL PRIMARY KEY` normal
+- **Genera:** CREATE TABLE con constraints, FKs con `ON DELETE CASCADE`, índices
+
+**Ejemplo generado:**
+
+```sql
+CREATE TABLE usuario (
+  id SERIAL PRIMARY KEY,
+  nombre VARCHAR(100) NOT NULL,
+  email VARCHAR(100)
+);
+
+CREATE TABLE proyecto_etiqueta (
+  proyecto_id INT NOT NULL,
+  etiqueta_id INT NOT NULL,
+  PRIMARY KEY (proyecto_id, etiqueta_id),
+  FOREIGN KEY (proyecto_id) REFERENCES proyecto(id) ON DELETE CASCADE
+);
+```
+
+**Dónde cambiar:**
+
+- **Comportamiento CASCADE:** Buscar `ON DELETE CASCADE` → cambiar a `RESTRICT` o `SET NULL`
+- **Generar índices:** Comentar bloque `CREATE INDEX` si no los necesitas
+- **Normalización de nombres:** Función que convierte a snake_case
+
+**Dependencias:** `relationUtils.ts` (classifyTable)
+
+---
+
+#### `springBootGenerator.ts` ⭐ - Generador de Spring Boot
+
+**Qué hace:** Genera proyecto Maven completo con JPA, Spring Boot 3.2, Docker
+
+**Función principal:** `generateSpringBootProject(model, projectName)`
+
+- **Genera:**
+  - pom.xml con dependencias (Spring Boot, JPA, H2, Lombok)
+  - Entidades JPA con `@Entity`, `@Data`, relaciones
+  - Repositories extendiendo `JpaRepository`
+  - Services con CRUD completo (findAll, findById, save, update, delete)
+  - Controllers REST con endpoints (GET, POST, PUT, DELETE)
+  - Dockerfile + docker-compose.yml
+- **Detección de tablas intermedias:**
+  - **JOIN pura** → `@ManyToMany` con `@JoinTable` (NO genera Entity separada)
+  - **JOIN extendida** → Entity completa con CRUD
+
+**Mapeo SQL → Java:**
+
+- `INT`, `SERIAL` → `Integer` | `BIGINT` → `Long`
+- `VARCHAR`, `TEXT` → `String` | `DECIMAL` → `BigDecimal`
+- `DATE` → `LocalDate` | `TIMESTAMP` → `LocalDateTime`
+- `BOOLEAN` → `Boolean`
+
+**Endpoints generados:**
+
+- `GET /{entidad}` - Listar | `POST /{entidad}` - Crear
+- `PUT /{entidad}/{id}` - Actualizar | `DELETE /{entidad}/{id}` - Eliminar
+
+**Dónde cambiar:**
+
+- **Puerto:** Buscar rango `8180-9080` y modificar
+- **Base de datos:** Cambiar H2 por PostgreSQL en pom.xml (agregar dependency)
+- **Mapeo de tipos:** Función `mapSQLTypeToJava`
+- **Versión Spring Boot:** En pom.xml tag `<version>3.2.0</version>`
+
+**Dependencias:** `jszip`, `relationUtils.ts`
+
+---
+
+#### `flutterGenerator.ts` ⭐ - Generador de Flutter
+
+**Qué hace:** Genera app Flutter completa con Provider, Material Design 3, CRUD
+
+**Función principal:** `generateFlutterProject(model, projectName)`
+
+- **Genera:**
+  - pubspec.yaml con dependencias (provider, http)
+  - Modelos Dart con fromJson/toJson/copyWith
+  - API Service (modo mock o backend real)
+  - Providers con ChangeNotifier
+  - Screens (List + Form) por cada entidad
+  - Navigation Drawer automático
+- **Detección de tablas intermedias:**
+  - **JOIN pura** → NO genera código
+  - **JOIN extendida** → CRUD completo con composite key
+
+**Mapeo SQL → Dart:**
+
+- `INT` → `int` (o `int?` si nullable)
+- `VARCHAR` → `String`
+- `BOOLEAN` → `bool`
+- `DATE`, `TIMESTAMP` → `DateTime`
+- `DECIMAL` → `double`
+
+**Configuración API:**
+
+```dart
+static const bool useBackend = false; // true para backend real
+static const String baseUrl = "http://localhost:8080";
+```
+
+**Dónde cambiar:**
+
+- **URL del backend:** Buscar `baseUrl` en api_service.dart generado
+- **Datos mock:** Función `generateMockData` para cambiar datos de ejemplo
+- **Mapeo de tipos:** Función `mapSQLTypeToDart`
+- **Colores del tema:** En main.dart buscar `primarySwatch`
+
+**Dependencias:** `jszip`, `relationUtils.ts`
+
+---
+
+#### `relationUtils.ts` ⭐⭐⭐ - Clasificación unificada
+
+**Qué hace:** Clasifica tablas de forma consistente para todos los generadores
+
+**Tipos de tabla:**
+
+1. **ENTITY** - Tabla normal con datos propios
+2. **JOIN_PURE** - Tabla intermedia con SOLO 2 FKs
+3. **JOIN_ENRICHED** - Tabla intermedia con 2 FKs + campos adicionales
+
+**Función principal:** `classifyTable(fields)`
+
+- **Detecta:** Cantidad de FKs, campos adicionales, timestamps
+- **Return:** `{ kind, foreignKeys, nonForeignFields, primaryKey }`
+
+**Impacto en generadores:**
+
+- **SQL:** JOIN_PURE → PK compuesta | JOIN_ENRICHED → id SERIAL
+- **Spring Boot:** JOIN_PURE → @ManyToMany | JOIN_ENRICHED → Entity
+- **Flutter:** JOIN_PURE → NO genera | JOIN_ENRICHED → CRUD con composite key
+
+**Dónde cambiar:**
+
+- **Ignorar timestamps:** Buscar array con `'created_at', 'updated_at'` si quieres que cuenten como campos
+- **Lógica de clasificación:** Función `classifyTable` para agregar nuevos tipos
+- **Detección de FKs:** Condición `field.name.endsWith('_id')` para cambiar convención
+
+**Dependencias:** `@shared/types`
+
+---
+
     - **Algoritmo de resolución de dependencias:** Ordenamiento topológico
       - Separa tablas base (sin FK) vs dependientes (con FK)
       - Crea tablas en orden correcto automáticamente
@@ -937,7 +1630,8 @@ _Legacy (Compatibilidad):_
     - Tablas intermedias para relaciones N-N automáticas desde edges
     - Índices automáticos en FKs para optimizar búsquedas
     - Comentarios mínimos para producción
-  - `downloadSQL(sql, fileName)` - Descarga SQL como archivo `.sql`
+
+- `downloadSQL(sql, fileName)` - Descarga SQL como archivo `.sql`
 - **Ejemplos generados:**
 
   ```sql
@@ -1023,14 +1717,33 @@ _Legacy (Compatibilidad):_
   - Usuario no-root en contenedor por seguridad
   - Healthcheck integrado en docker-compose
   - README con ejemplos cURL y instrucciones Docker/Maven
-- **Mapeo de tipos SQL → Java:**
-  - `INT/SERIAL` → `Long`
-  - `VARCHAR/TEXT` → `String`
-  - `BOOLEAN` → `Boolean`
-  - `DECIMAL/NUMERIC` → `Double`
-  - `TIMESTAMP/DATETIME` → `LocalDateTime`
-  - `DATE` → `LocalDate`
-  - `TIME` → `LocalTime`
+- **🔧 Mapeo de tipos SQL → Java MEJORADO:**
+  - **Tipos numéricos:**
+    - `INT`, `SERIAL` → `Integer` ✅ (antes era `Long` ❌)
+    - `BIGINT`, `BIGSERIAL` → `Long`
+    - `SMALLINT` → `Short`
+  - **Tipos decimales:**
+    - `DECIMAL`, `NUMERIC`, `MONEY` → `BigDecimal` ✅ (antes era `Double` ❌)
+    - `FLOAT`, `REAL` → `Float`
+    - `DOUBLE` → `Double`
+  - **Tipos de texto:**
+    - `VARCHAR`, `TEXT`, `CHAR` → `String`
+  - **Tipos de fecha/hora:**
+    - `DATE` → `LocalDate`
+    - `TIMESTAMP`, `DATETIME` → `LocalDateTime`
+    - `TIME` → `LocalTime`
+  - **Otros tipos:**
+    - `BOOLEAN` → `Boolean`
+    - `UUID` → `UUID` (nuevo)
+    - `BLOB`, `BYTEA` → `byte[]`
+    - `JSON` → `String`
+- **✨ Imports automáticos:**
+  - Detecta tipos usados en cada entidad
+  - Agrega imports necesarios: `java.time.LocalDate`, `java.math.BigDecimal`, etc.
+  - Evita duplicados con `Set<string>`
+  - Logs de depuración: `🔧 [AI JavaGen] Added import java.time.LocalDate for field 'fecha'`
+  - Ordenamiento automático: `java.*` → `jakarta.*` → `lombok.*`
+  - Compatible con **Jakarta EE 9+** (Spring Boot 3.x)
 - **Conversión de nombres:**
   - snake_case → PascalCase (clases)
   - snake_case → camelCase (variables)
@@ -1038,14 +1751,24 @@ _Legacy (Compatibilidad):_
 
   ```java
   // Join pura: NO genera entidad, usa @ManyToMany
+  package com.app.entity;
+
+  import java.util.Set;
+  import java.util.HashSet;
+  import jakarta.persistence.*;
+  import lombok.Data;
+  import lombok.NoArgsConstructor;
+  import lombok.AllArgsConstructor;
+
   @Entity
+  @Table(name = "proyecto")
   @Data
   @NoArgsConstructor
   @AllArgsConstructor
   public class Proyecto {
       @Id
       @GeneratedValue(strategy = GenerationType.IDENTITY)
-      private Long id;
+      private Integer id;
 
       @ManyToMany
       @JoinTable(
@@ -1056,7 +1779,16 @@ _Legacy (Compatibilidad):_
       private Set<Etiqueta> etiquetas = new HashSet<>();
   }
 
-  // Join extendida: Genera entidad completa
+  // Join extendida: Genera entidad completa con imports automáticos
+  package com.app.entity;
+
+  import java.math.BigDecimal;
+  import java.time.LocalDateTime;
+  import jakarta.persistence.*;
+  import lombok.Data;
+  import lombok.NoArgsConstructor;
+  import lombok.AllArgsConstructor;
+
   @Entity
   @Table(name = "carrito")
   @Data
@@ -1065,7 +1797,7 @@ _Legacy (Compatibilidad):_
   public class Carrito {
       @Id
       @GeneratedValue(strategy = GenerationType.IDENTITY)
-      private Long id;
+      private Integer id;
 
       @ManyToOne
       @JoinColumn(name = "usuario_id")
@@ -1076,7 +1808,8 @@ _Legacy (Compatibilidad):_
       private Producto producto;
 
       private Integer cantidad;
-      private LocalDateTime fecha;
+      private BigDecimal precioUnitario; // DECIMAL → BigDecimal con import automático
+      private LocalDateTime fecha;       // TIMESTAMP → LocalDateTime con import automático
   }
   ```
 

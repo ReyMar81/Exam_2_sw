@@ -29,6 +29,7 @@ export function AIPromptBar({
   const [isRecording, setIsRecording] = useState(false);
   const [speechSupported, setSpeechSupported] = useState(false);
   const recognitionRef = useRef<any>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Verificar soporte de Web Speech API
   useEffect(() => {
@@ -156,6 +157,155 @@ export function AIPromptBar({
     }
   };
 
+  /**
+   * Función auxiliar para redimensionar y comprimir imagen
+   */
+  const resizeAndCompressImage = (
+    file: File,
+    maxSize = 1200,
+    quality = 0.8
+  ): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const reader = new FileReader();
+
+      reader.onload = (e) => {
+        img.src = e.target?.result as string;
+      };
+
+      reader.onerror = () => {
+        reject(new Error("Error al leer el archivo"));
+      };
+
+      img.onload = () => {
+        try {
+          // Calcular escala manteniendo proporción
+          const scale = Math.min(maxSize / img.width, maxSize / img.height, 1);
+          const canvas = document.createElement("canvas");
+          canvas.width = img.width * scale;
+          canvas.height = img.height * scale;
+
+          const ctx = canvas.getContext("2d");
+          if (!ctx) {
+            reject(new Error("No se pudo obtener contexto del canvas"));
+            return;
+          }
+
+          // Dibujar imagen redimensionada
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+          // Convertir a JPEG con calidad 0.8
+          const compressed = canvas.toDataURL("image/jpeg", quality);
+
+          // Extraer solo el Base64 (sin el prefijo data:image/jpeg;base64,)
+          const base64 = compressed.split(",")[1];
+
+          console.log(
+            `📷 [Image] Resized to ${canvas.width}x${canvas.height}, size: ${Math.round(
+              base64.length / 1024
+            )}KB`
+          );
+
+          resolve(base64);
+        } catch (err) {
+          reject(err);
+        }
+      };
+
+      img.onerror = () => {
+        reject(new Error("Error al cargar la imagen"));
+      };
+
+      reader.readAsDataURL(file);
+    });
+  };
+
+  /**
+   * Manejar selección de archivo de imagen
+   */
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validar tipo de archivo
+    if (!file.type.startsWith("image/")) {
+      setError("Por favor selecciona un archivo de imagen válido");
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    // Validar tamaño (máximo 10MB antes de comprimir)
+    if (file.size > 10 * 1024 * 1024) {
+      setError("La imagen es muy grande. Tamaño máximo: 10MB");
+      setTimeout(() => setError(null), 3000);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      console.log("📷 [Image] Processing image:", file.name);
+
+      // Redimensionar y comprimir imagen
+      const imageBase64 = await resizeAndCompressImage(file, 1200, 0.8);
+
+      console.log("🧠 [AIPromptBar] Sending image to AI...");
+
+      // Enviar imagen al backend
+      const response = await api.post("/api/ai/parse-image", {
+        imageBase64,
+        projectId,
+        userId,
+      });
+
+      const { actions, metadata } = response.data;
+
+      console.log(
+        `✅ [AIPromptBar] Received ${actions.length} action(s) from image analysis:`,
+        actions
+      );
+      console.log("📊 [AIPromptBar] Metadata:", metadata);
+
+      if (actions.length === 0) {
+        setError(
+          "No se detectaron tablas o relaciones en la imagen. Intenta con otra imagen más clara."
+        );
+        setTimeout(() => setError(null), 5000);
+        return;
+      }
+
+      // Enviar acciones al componente padre (DiagramEditor)
+      onActionsReceived(actions);
+
+      // Limpiar input de archivo
+      if (fileInputRef.current) {
+        fileInputRef.current.value = "";
+      }
+    } catch (err: any) {
+      console.error("❌ [AIPromptBar] Image processing error:", err);
+
+      const errorMessage =
+        err.response?.data?.error ||
+        err.response?.data?.details ||
+        "Error al analizar la imagen. Intenta con otra imagen.";
+
+      setError(errorMessage);
+
+      // Auto-limpiar error después de 5 segundos
+      setTimeout(() => setError(null), 5000);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  /**
+   * Abrir selector de archivos
+   */
+  const handleCameraClick = () => {
+    fileInputRef.current?.click();
+  };
+
   return (
     <>
       {/* Barra compacta tipo ChatGPT */}
@@ -238,6 +388,34 @@ export function AIPromptBar({
           >
             {prompt.length}/500
           </span>
+
+          {/* Input oculto para archivos de imagen */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            onChange={handleImageUpload}
+            style={{ display: "none" }}
+          />
+
+          {/* Botón de cámara/imagen */}
+          <button
+            type="button"
+            onClick={handleCameraClick}
+            disabled={loading || disabled}
+            style={{
+              background: "transparent",
+              border: "none",
+              cursor: loading || disabled ? "not-allowed" : "pointer",
+              fontSize: 20,
+              padding: "4px 8px",
+              transition: "all 0.2s",
+              opacity: loading || disabled ? 0.3 : 1,
+            }}
+            title="Analizar imagen de diagrama"
+          >
+            📷
+          </button>
 
           {/* Botón de micrófono (solo si está soportado) */}
           {speechSupported && (

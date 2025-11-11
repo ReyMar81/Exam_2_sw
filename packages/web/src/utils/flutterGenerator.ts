@@ -681,8 +681,8 @@ import 'package:http/http.dart' as http;
 
 class ApiService {
   // Configuración de modo
-  static const bool useBackend = false; // Cambiar a true para usar backend real
-  static const String baseUrl = "http://localhost:8080"; // Cambiar a URL del backend Spring Boot
+  static final bool useBackend = false; // Cambiar a true para usar backend real
+  static final String baseUrl = "http:///10.0.2.2:8080"; // Cambiar a URL del backend Spring Boot en emulador Android
 
 ${mockData}
 

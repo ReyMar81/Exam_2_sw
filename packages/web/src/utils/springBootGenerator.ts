@@ -155,7 +155,7 @@ function analyzeTablesMetadata(nodes: Node[], edges: Edge[]): TableMetadata[] {
       foreignKeys,
       isJunctionTable,
       hasAdditionalFields,
-      isPureJoinTable // Nueva propiedad
+      isPureJoinTable
     };
   });
 }
@@ -398,12 +398,17 @@ function generateEntity(
   packageName: string,
   allTables: TableMetadata[]
 ): string {
+  // Imports base para JPA y Lombok
   const imports = new Set<string>([
     'jakarta.persistence.*',
     'lombok.Data',
     'lombok.NoArgsConstructor',
     'lombok.AllArgsConstructor'
   ]);
+
+  // Detectar y agregar imports automáticos según tipos de campos
+  const typeImports = getRequiredImports(table.fields);
+  typeImports.forEach(imp => imports.add(imp));
 
   let classAnnotations = '@Entity\n';
   classAnnotations += `@Table(name = "${table.tableName}")\n`;
@@ -480,8 +485,21 @@ function generateEntity(
   });
 
   const importsCode = Array.from(imports)
+    .sort((a, b) => {
+      // Ordenar imports: java.* primero, luego jakarta.*, luego lombok.*
+      const getOrder = (imp: string) => {
+        if (imp.startsWith('java.')) return 0;
+        if (imp.startsWith('jakarta.')) return 1;
+        if (imp.startsWith('lombok.')) return 2;
+        return 3;
+      };
+      const orderDiff = getOrder(a) - getOrder(b);
+      return orderDiff !== 0 ? orderDiff : a.localeCompare(b);
+    })
     .map(imp => `import ${imp};`)
     .join('\n');
+
+  console.log(`✅ [AI JavaGen] Generated entity ${table.className} with ${imports.size} imports`);
 
   return `package ${packageName}.entity;
 
@@ -497,7 +515,7 @@ ${fieldsCode}}
  * Genera repositorio JPA
  */
 function generateRepository(table: TableMetadata, packageName: string): string {
-  const idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Long';
+  const idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Integer';
   
   return `package ${packageName}.repository;
 
@@ -515,7 +533,7 @@ public interface ${table.className}Repository extends JpaRepository<${table.clas
  * Genera servicio con lógica CRUD
  */
 function generateService(table: TableMetadata, packageName: string): string {
-  const idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Long';
+  const idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Integer';
   const entityVar = toCamelCase(table.className);
   
   return `package ${packageName}.service;
@@ -564,7 +582,7 @@ public class ${table.className}Service {
  * Genera controlador REST
  */
 function generateController(table: TableMetadata, packageName: string): string {
-  const idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Long';
+  const idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Integer';
   const entityVar = toCamelCase(table.className);
   const pluralName = table.tableName; // Usar nombre de tabla como plural
   
@@ -695,6 +713,30 @@ La base de datos se crea automáticamente en memoria con todas las tablas del di
 
 ---
 
+## 🔄 Mapeo de Tipos SQL → Java
+
+El generador convierte automáticamente los tipos SQL a tipos Java apropiados:
+
+| Tipo SQL | Tipo Java | Import Automático |
+|----------|-----------|-------------------|
+| \`INT\`, \`SERIAL\` | \`Integer\` | — |
+| \`BIGINT\`, \`BIGSERIAL\` | \`Long\` | — |
+| \`SMALLINT\` | \`Short\` | — |
+| \`VARCHAR\`, \`TEXT\` | \`String\` | — |
+| \`BOOLEAN\` | \`Boolean\` | — |
+| \`DECIMAL\`, \`NUMERIC\` | \`BigDecimal\` | \`java.math.BigDecimal\` |
+| \`FLOAT\`, \`REAL\` | \`Float\` | — |
+| \`DOUBLE\` | \`Double\` | — |
+| \`DATE\` | \`LocalDate\` | \`java.time.LocalDate\` |
+| \`DATETIME\`, \`TIMESTAMP\` | \`LocalDateTime\` | \`java.time.LocalDateTime\` |
+| \`TIME\` | \`LocalTime\` | \`java.time.LocalTime\` |
+| \`UUID\` | \`UUID\` | \`java.util.UUID\` |
+| \`BLOB\`, \`BYTEA\` | \`byte[]\` | — |
+
+> **Nota:** Los imports se agregan automáticamente según los tipos detectados en cada entidad.
+
+---
+
 ## 🌐 Endpoints REST
 
 Cada entidad generada tiene endpoints CRUD completos:
@@ -785,27 +827,88 @@ Edita \`src/main/resources/application.properties\` para cambiar:
 ## 📝 Generado por
 
 **Exam_2_sw** - Sistema de diagramas ER colaborativo  
-Exportación automática: Spring Boot 3.2 + Maven + Docker
+Exportación automática: Spring Boot 3.2 + Maven + Docker  
+Framework: Jakarta EE 9+ (Spring Boot 3.x)
 `;
 }
 
 /**
- * Mapea tipos SQL a tipos Java
+ * Mapea tipos SQL a tipos Java con precisión mejorada
  */
 function mapSqlToJavaType(sqlType: string): string {
   const type = sqlType.toUpperCase();
   
-  if (type.includes('INT') || type.includes('SERIAL')) return 'Long';
-  if (type.includes('VARCHAR') || type.includes('TEXT')) return 'String';
-  if (type.includes('BOOLEAN') || type.includes('BOOL')) return 'Boolean';
-  if (type.includes('DECIMAL') || type.includes('NUMERIC')) return 'Double';
-  if (type.includes('FLOAT') || type.includes('REAL')) return 'Double';
-  if (type.includes('DATE') && !type.includes('TIME')) return 'LocalDate';
-  if (type.includes('TIMESTAMP') || type.includes('DATETIME')) return 'LocalDateTime';
-  if (type.includes('TIME')) return 'LocalTime';
-  if (type.includes('BLOB') || type.includes('BYTEA')) return 'byte[]';
+  // Tipos numéricos enteros
+  if (type.includes('BIGINT') || type.includes('BIGSERIAL')) return 'Long';
+  if (type.includes('INT') || type.includes('SERIAL')) return 'Integer';
+  if (type.includes('SMALLINT')) return 'Short';
+  if (type.includes('TINYINT')) return 'Byte';
   
-  return 'String'; // Default
+  // Tipos de texto
+  if (type.includes('VARCHAR') || type.includes('TEXT') || type.includes('CHAR')) return 'String';
+  
+  // Tipos booleanos
+  if (type.includes('BOOLEAN') || type.includes('BOOL')) return 'Boolean';
+  
+  // Tipos decimales (usar BigDecimal para precisión)
+  if (type.includes('DECIMAL') || type.includes('NUMERIC') || type.includes('MONEY')) return 'BigDecimal';
+  
+  // Tipos de punto flotante
+  if (type.includes('DOUBLE')) return 'Double';
+  if (type.includes('FLOAT') || type.includes('REAL')) return 'Float';
+  
+  // Tipos de fecha y hora
+  if (type.includes('TIMESTAMP') || type.includes('DATETIME')) return 'LocalDateTime';
+  if (type.includes('DATE') && !type.includes('TIME')) return 'LocalDate';
+  if (type.includes('TIME') && !type.includes('STAMP')) return 'LocalTime';
+  
+  // Tipos binarios
+  if (type.includes('BLOB') || type.includes('BYTEA') || type.includes('BINARY')) return 'byte[]';
+  
+  // UUID
+  if (type.includes('UUID')) return 'UUID';
+  
+  // JSON (como String por defecto)
+  if (type.includes('JSON')) return 'String';
+  
+  return 'String'; // Default para tipos desconocidos
+}
+
+/**
+ * Determina qué imports Java son necesarios según los tipos de campos
+ */
+function getRequiredImports(fields: Field[]): Set<string> {
+  const imports = new Set<string>();
+  
+  fields.forEach(field => {
+    const javaType = mapSqlToJavaType(field.type);
+    
+    // Imports según el tipo Java
+    switch (javaType) {
+      case 'LocalDate':
+        imports.add('java.time.LocalDate');
+        console.log(`🔧 [AI JavaGen] Added import java.time.LocalDate for field '${field.name}' (${field.type})`);
+        break;
+      case 'LocalDateTime':
+        imports.add('java.time.LocalDateTime');
+        console.log(`🔧 [AI JavaGen] Added import java.time.LocalDateTime for field '${field.name}' (${field.type})`);
+        break;
+      case 'LocalTime':
+        imports.add('java.time.LocalTime');
+        console.log(`🔧 [AI JavaGen] Added import java.time.LocalTime for field '${field.name}' (${field.type})`);
+        break;
+      case 'BigDecimal':
+        imports.add('java.math.BigDecimal');
+        console.log(`🔧 [AI JavaGen] Added import java.math.BigDecimal for field '${field.name}' (${field.type})`);
+        break;
+      case 'UUID':
+        imports.add('java.util.UUID');
+        console.log(`🔧 [AI JavaGen] Added import java.util.UUID for field '${field.name}' (${field.type})`);
+        break;
+    }
+  });
+  
+  return imports;
 }
 
 /**
