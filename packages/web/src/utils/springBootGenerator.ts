@@ -466,9 +466,52 @@ function generateEntity(
       const refTable = allTables.find(t => t.tableName === refTableName);
       
       if (refTable && !refTable.isPureJoinTable) {
-        // Solo generar @ManyToOne si NO es join pura (ya se maneja con @ManyToMany)
-        fieldsCode += '    @ManyToOne\n';
-        fieldsCode += `    @JoinColumn(name = "${field.name}")\n`;
+        // 🎯 UML 2.5: Determinar tipo de relación y CASCADE
+        const relationType = field.relationType || "1-N";
+        let cascadeType = '';
+        let fetchType = 'FetchType.EAGER';
+        let optional = 'optional = true';
+        
+        switch (relationType) {
+          case 'COMPOSITION':
+            // ◆ Composición: CASCADE ALL (orphanRemoval solo aplica en @OneToMany)
+            cascadeType = ', cascade = CascadeType.ALL';
+            optional = 'optional = false';
+            fetchType = 'FetchType.EAGER';
+            break;
+            
+          case 'AGGREGATION':
+            // ◇ Agregación: Sin CASCADE, opcional
+            cascadeType = '';
+            optional = 'optional = true';
+            fetchType = 'FetchType.LAZY';
+            break;
+            
+          case 'INHERITANCE':
+            // △ Herencia: CASCADE PERSIST + MERGE
+            cascadeType = ', cascade = {CascadeType.PERSIST, CascadeType.MERGE}';
+            optional = 'optional = false';
+            fetchType = 'FetchType.EAGER';
+            break;
+            
+          default:
+            // ASSOCIATION, 1-1, 1-N: Comportamiento estándar
+            cascadeType = field.nullable ? '' : ', cascade = CascadeType.PERSIST';
+            optional = field.nullable ? 'optional = true' : 'optional = false';
+            fetchType = 'FetchType.LAZY';
+        }
+        
+        fieldsCode += `    @ManyToOne(fetch = ${fetchType}${cascadeType}, ${optional})\n`;
+        fieldsCode += `    @JoinColumn(name = "${field.name}"`;
+        
+        // Agregar nullable según campo
+        if (field.nullable) {
+          fieldsCode += ', nullable = true';
+        } else {
+          fieldsCode += ', nullable = false';
+        }
+        
+        fieldsCode += ')\n';
         fieldsCode += `    private ${refTable.className} ${toCamelCase(refTable.tableName)};\n\n`;
         return;
       }

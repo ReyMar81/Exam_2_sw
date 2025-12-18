@@ -103,6 +103,7 @@ export function AIPromptBar({
       }
 
       // Enviar acciones al componente padre (DiagramEditor)
+      console.log("📤 [AIPromptBar] Calling onActionsReceived with actions:", actions);
       onActionsReceived(actions);
 
       // Limpiar input después de éxito

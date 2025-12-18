@@ -1,12 +1,66 @@
 /**
  * Utilidades para manejo de relaciones en el diagrama ER
  * Detecta automáticamente PK/FK y gestiona la creación/eliminación de relaciones
+ * Soporta UML 2.5: Herencia, Composición, Agregación, etc.
  */
 
 import { Node, Edge } from "reactflow";
 import type { Field, TableData } from "@shared/types";
 
 export type { Field, TableData };
+
+/**
+ * Implementa herencia extendiendo campos de la clase padre a la clase hija
+ * @param childTable - Nodo de la clase hija (subclase)
+ * @param parentTable - Nodo de la clase padre (superclase)
+ * @returns Array de campos heredados agregados
+ */
+export function implementInheritance(
+  childTable: Node<TableData>,
+  parentTable: Node<TableData>
+): Field[] {
+  const inheritedFields: Field[] = [];
+  
+  // 🎯 Estrategia Table-Per-Type (UML 2.5):
+  // La subclase SOLO tiene FK al padre + campos propios
+  // Los campos comunes NO se duplican (están en la superclase)
+  
+  const pkField = parentTable.data.fields.find(f => f.isPrimary);
+  if (!pkField) {
+    console.warn(`⚠️ [Inheritance] Parent table ${parentTable.data.name} has no PK`);
+    return inheritedFields;
+  }
+  
+  // Verificar si ya existe FK al padre
+  const existingFK = childTable.data.fields.find(
+    (f) => f.isForeign && f.references === parentTable.data.name
+  );
+  
+  if (!existingFK) {
+    // Crear SOLO FK al padre (no copiar campos)
+    const fkField: Field = {
+      id: Date.now() + Math.random(),
+      name: `${parentTable.data.name.toLowerCase()}_${pkField.name}`,
+      type: pkField.type,
+      isForeign: true,
+      isPrimary: false,
+      nullable: false,
+      references: parentTable.data.name,
+      referencesField: pkField.name,
+      relationType: "INHERITANCE",
+      onDelete: "CASCADE",
+      onUpdate: "CASCADE",
+    };
+    childTable.data.fields.push(fkField);
+    inheritedFields.push(fkField);
+    
+    console.log(`🔼 [Inheritance] ${childTable.data.name} → ${parentTable.data.name}: Created FK ${fkField.name}`);
+  } else {
+    console.log(`ℹ️ [Inheritance] FK already exists: ${childTable.data.name} → ${parentTable.data.name}`);
+  }
+  
+  return inheritedFields;
+}
 
 /**
  * Determina cuál tabla debe tener la PK y cuál la FK al crear una relación
@@ -64,15 +118,61 @@ export function createFKField(
     return existingFK; // No crear duplicado
   }
 
+  // 🎯 Lógica UML 2.5 según tipo de relación
+  let onDelete: "CASCADE" | "SET NULL" | "RESTRICT" | "NO ACTION" | undefined;
+  let onUpdate: "CASCADE" | "SET NULL" | "RESTRICT" | "NO ACTION" | undefined;
+  let nullable = false;
+  
+  switch (relationType) {
+    case "COMPOSITION":
+      // ◆ Composición: ciclo de vida dependiente
+      // Si se elimina el "todo", se eliminan las "partes"
+      onDelete = "CASCADE";
+      onUpdate = "CASCADE";
+      nullable = false; // La parte NO puede existir sin el todo
+      break;
+      
+    case "AGGREGATION":
+      // ◇ Agregación: existencia independiente
+      // Si se elimina el "todo", las "partes" quedan huérfanas pero existen
+      onDelete = "SET NULL";
+      onUpdate = "NO ACTION";
+      nullable = true; // La parte PUEDE existir sin el todo
+      break;
+      
+    case "ASSOCIATION":
+      // → Asociación: relación bidireccional estándar
+      onDelete = "RESTRICT"; // Evitar eliminación accidental
+      onUpdate = "NO ACTION";
+      nullable = true;
+      break;
+      
+    case "1-1":
+    case "1-N":
+      // Crow's Foot: comportamiento estándar
+      onDelete = "RESTRICT";
+      onUpdate = "NO ACTION";
+      nullable = false;
+      break;
+      
+    default:
+      // Por defecto: RESTRICT para evitar eliminaciones accidentales
+      onDelete = "RESTRICT";
+      onUpdate = "NO ACTION";
+      nullable = false;
+  }
+
   const newField: Field = {
     id: Date.now(),
     name: `${pkTable.data.name.toLowerCase()}_${pkField.name}`,
     type: pkField.type,
     isForeign: true,
-    nullable: false,
-    references: pkTable.data.name, // Nombre de la tabla
-    referencesField: pkField.name, // 🆕 Nombre del campo PK específico
-    relationType: relationType || "1-N", // 🆕 Guardar tipo de relación
+    nullable,
+    references: pkTable.data.name,
+    referencesField: pkField.name,
+    relationType: relationType || "1-N",
+    onDelete,
+    onUpdate,
   };
 
   fkTable.data.fields.push(newField);

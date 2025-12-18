@@ -382,27 +382,41 @@ ${routes}
  * Genera modelo Dart
  */
 function generateModel(table: TableMetadata): string {
+  // 🎯 Detectar herencia (si hay FK con relationType = INHERITANCE)
+  const inheritanceFK = table.fields.find(f => f.isForeign && f.relationType === 'INHERITANCE');
+  const parentClass = inheritanceFK ? toPascalCase(inheritanceFK.references || '') : null;
+  
   const fields = table.fields.map(field => {
     const dartType = mapSqlToDartType(field.type);
     const isIdField = field.name.toLowerCase() === 'id' && field.isPrimary;
     const isForeignKey = field.isForeign || field.name.toLowerCase().endsWith('_id');
+    const relationType = field.relationType || '';
     
-    // Regla de nullable:
-    // - IDs autogenerados: nullable (int?)
-    // - FKs: nullable (int?) a menos que la tabla sea JOIN_ENRICHED o JOIN_PURE
-    // - Otros campos: basado en la definición de la columna
+    // 🎯 UML 2.5: Ajustar nullable según tipo de relación
     let nullable = '';
     let isNullable = false;
     
     if (isIdField) {
       nullable = '?';
       isNullable = true;
+    } else if (relationType === 'INHERITANCE') {
+      // △ Herencia: En Flutter mantenemos FK explícito (no extends)
+      nullable = '';
+      isNullable = false;
+    } else if (relationType === 'COMPOSITION') {
+      // ◆ Composición: NUNCA nullable (ciclo de vida dependiente)
+      nullable = '';
+      isNullable = false;
+    } else if (relationType === 'AGGREGATION') {
+      // ◇ Agregación: SIEMPRE nullable (existencia independiente)
+      nullable = '?';
+      isNullable = true;
     } else if (isForeignKey && table.tableKind === 'ENTITY') {
-      // FKs en tablas normales son opcionales
+      // FKs normales en entidades son opcionales
       nullable = '?';
       isNullable = true;
     } else if (table.tableKind !== 'ENTITY' && isForeignKey) {
-      // FKs en tablas JOIN (PURE o ENRICHED) NO son nullable
+      // FKs en tablas JOIN NO son nullable
       nullable = '';
       isNullable = false;
     } else if (field.nullable) {
@@ -422,7 +436,7 @@ function generateModel(table: TableMetadata): string {
       isForeign: field.isForeign || field.name.toLowerCase().endsWith('_id'),
       isNullable: isNullable
     };
-  });
+  }).filter(f => f !== null); // Filtrar campos null (como INHERITANCE FK)
 
   const classFields = fields.map(f => `  final ${f.type} ${f.name};`).join('\n');
   
@@ -682,7 +696,7 @@ import 'package:http/http.dart' as http;
 class ApiService {
   // Configuración de modo
   static final bool useBackend = false; // Cambiar a true para usar backend real
-  static final String baseUrl = "http:///10.0.2.2:8080"; // Cambiar a URL del backend Spring Boot en emulador Android
+  static final String baseUrl = "http://10.0.2.2:8080"; // Cambiar a URL del backend Spring Boot en emulador Android
 
 ${mockData}
 

@@ -498,29 +498,47 @@ export default function PropertiesPanel({
                       // Obtener estilo unificado según tipo de relación
                       const edgeStyle = getEdgeStyle(relationType);
 
+                      // Mapear tipo a label legible en español
+                      const labelMap: Record<string, string> = {
+                        "1-1": "1‒1",
+                        "1-N": "1‒N",
+                        "N-N": "N‒N",
+                        "ASSOCIATION": "Asociación",
+                        "AGGREGATION": "Agregación",
+                        "COMPOSITION": "Composición",
+                        "INHERITANCE": "Herencia",
+                        "DEPENDENCY": "Dependencia",
+                        "REALIZATION": "Realización"
+                      };
+
                       // Crear nuevo edge con el tipo seleccionado
                       const newEdge: Edge = {
                         id: `edge-fk-${Date.now()}`,
                         source: targetNode.id,   // Tabla referenciada (lado PK)
                         target: selectedNode.id, // Tabla con FK
-                        label: relationType,
+                        label: labelMap[relationType] || relationType,
                         animated: edgeStyle.animated,
                         style: {
                           stroke: edgeStyle.stroke,
                           strokeWidth: edgeStyle.strokeWidth,
-                          strokeDasharray: edgeStyle.strokeDasharray // 🆕 Línea punteada
+                          strokeDasharray: edgeStyle.strokeDasharray,
+                          // Agregar markerEnd desde el style si existe (para UML markers personalizados)
+                          ...(edgeStyle.style || {})
                         },
                         type: edgeStyle.type,
                         labelStyle: {
                           fill: edgeStyle.stroke,
                           fontWeight: 700,
-                          fontSize: 12
+                          fontSize: 12,
+                          textShadow: "0 1px 3px rgba(0,0,0,0.8)"
                         },
                         labelBgStyle: edgeStyle.labelBgStyle,
-                        markerEnd: {
-                          type: 'arrowclosed',
-                          color: edgeStyle.stroke
-                        },
+                        markerEnd: typeof edgeStyle.markerEnd === 'object' ? {
+                          type: (edgeStyle.markerEnd as any).type,
+                          color: (edgeStyle.markerEnd as any).color,
+                          width: 20,
+                          height: 20
+                        } : undefined,
                         // 🆕 Guardar campos específicos en data del edge
                         data: {
                           sourceField: targetPKName,           // Campo PK de la tabla referenciada

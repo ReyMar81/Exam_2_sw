@@ -13,6 +13,27 @@ export enum Role {
   VIEWER = "VIEWER",
 }
 
+/**
+ * Tipos de relación soportados:
+ * - Crow's Foot (legacy): 1-1, 1-N, N-N, FK
+ * - UML 2.5: ASSOCIATION, AGGREGATION, COMPOSITION, INHERITANCE, DEPENDENCY, REALIZATION
+ */
+export enum RelationType {
+  // Crow's Foot (legacy - mantener retrocompatibilidad)
+  ONE_TO_ONE = "1-1",
+  ONE_TO_MANY = "1-N",
+  MANY_TO_MANY = "N-N",
+  FOREIGN_KEY = "FK",
+  
+  // UML 2.5
+  ASSOCIATION = "ASSOCIATION",        // Línea continua simple
+  AGGREGATION = "AGGREGATION",        // Línea con rombo blanco
+  COMPOSITION = "COMPOSITION",        // Línea con rombo negro
+  INHERITANCE = "INHERITANCE",        // Línea con triángulo blanco (generalización)
+  DEPENDENCY = "DEPENDENCY",          // Línea punteada con flecha
+  REALIZATION = "REALIZATION",        // Línea punteada con triángulo blanco
+}
+
 // ========================
 // Diagram Types
 // ========================
@@ -29,6 +50,9 @@ export interface Field {
   relationType?: string;
   unique?: boolean;
   defaultValue?: string;
+  // 🆕 UML 2.5: Comportamiento de CASCADE
+  onDelete?: "CASCADE" | "SET NULL" | "RESTRICT" | "NO ACTION";
+  onUpdate?: "CASCADE" | "SET NULL" | "RESTRICT" | "NO ACTION";
 }
 
 export interface TableData {

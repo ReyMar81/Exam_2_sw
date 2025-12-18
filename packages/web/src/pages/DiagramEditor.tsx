@@ -20,11 +20,12 @@ import { api } from "../api";
 import TableNode from "../components/TableNode";
 import { Sidebar } from "../components/Sidebar";
 import PropertiesPanel from "../components/PropertiesPanel";
+import DownloadButton from "../components/DownloadButton";
 import { generateSQL, downloadSQL } from "../utils/sqlGenerator";
 import { generateSpringBootProject, downloadSpringBootProject } from "../utils/springBootGenerator";
 import { generateFlutterProject, downloadFlutterProject } from "../utils/flutterGenerator";
 import { determinePKFK, createFKField } from "../utils/relationHandler";
-import { getEdgeStyle } from "../utils/relationStyles";
+import { getEdgeStyle, UML_SVG_MARKERS } from "../utils/relationStyles";
 // 🧠 AI Integration
 import { AIPromptBar } from "../components/AIPromptBar";
 
@@ -155,56 +156,73 @@ export default function DiagramEditor() {
                 fields.forEach((field: any) => {
                   // Si el field es FK y tiene references + referencesField
                   if (field.isForeign && field.references && field.referencesField) {
-                    // Buscar si ya existe un edge para esta relación específica
+                    // Encontrar el nodo referenciado primero
+                    const targetNode = loadedNodes.find((n: any) => 
+                      n.data.name === field.references || n.data.label === field.references
+                    );
+                    
+                    if (!targetNode) return;
+                    
+                    // Buscar si ya existe UN EDGE entre estos dos nodos (en cualquier dirección)
                     const existingEdge = loadedEdges.find((e: any) => 
-                      e.data?.sourceField === field.referencesField && 
-                      e.data?.targetField === field.name &&
-                      e.target === node.id
+                      (e.source === targetNode.id && e.target === node.id) ||
+                      (e.source === node.id && e.target === targetNode.id)
                     );
                     
                     if (!existingEdge) {
-                      // Encontrar el nodo referenciado
-                      const targetNode = loadedNodes.find((n: any) => 
-                        n.data.name === field.references || n.data.label === field.references
-                      );
+                      console.log(`🔧 [Editor] Reconstructing missing edge: ${targetNode.data.name}.${field.referencesField} → ${node.data.name}.${field.name}`);
                       
-                      if (targetNode) {
-                        console.log(`🔧 [Editor] Reconstructing edge: ${targetNode.data.name}.${field.referencesField} → ${node.data.name}.${field.name}`);
-                        
-                        // Obtener estilo según tipo de relación
+                      // Obtener estilo según tipo de relación
                         const edgeStyle = getEdgeStyle(field.relationType || "1-N");
                         
-                        const reconstructedEdge: any = {
-                          id: `edge-reconstructed-${Date.now()}-${Math.random()}`,
-                          source: targetNode.id,  // Tabla con PK
-                          target: node.id,        // Tabla con FK
-                          label: field.relationType || "1-N",
-                          animated: edgeStyle.animated,
-                          style: { 
-                            stroke: edgeStyle.stroke, 
-                            strokeWidth: edgeStyle.strokeWidth,
-                            strokeDasharray: edgeStyle.strokeDasharray
-                          },
-                          type: edgeStyle.type,
-                          labelStyle: { 
-                            fill: edgeStyle.stroke, 
-                            fontWeight: 700, 
-                            fontSize: 13
-                          },
-                          labelBgStyle: edgeStyle.labelBgStyle,
-                          markerEnd: {
-                            type: 'arrowclosed',
-                            color: edgeStyle.stroke
-                          },
-                          data: {
-                            sourceField: field.referencesField,  // Campo PK
-                            targetField: field.name,             // Campo FK
-                            relationType: field.relationType || "1-N"
-                          }
+                        // Mapear tipo a label legible en español
+                        const labelMap: Record<string, string> = {
+                          "1-1": "1‒1",
+                          "1-N": "1‒N",
+                          "N-N": "N‒N",
+                          "ASSOCIATION": "Asociación",
+                          "AGGREGATION": "Agregación",
+                          "COMPOSITION": "Composición",
+                          "INHERITANCE": "Herencia",
+                          "DEPENDENCY": "Dependencia",
+                          "REALIZATION": "Realización"
                         };
                         
-                        reconstructedEdges.push(reconstructedEdge);
-                      }
+                      const reconstructedEdge: any = {
+                        id: `edge-${targetNode.id}-${node.id}-${field.name}`,
+                        source: targetNode.id,  // Tabla con PK
+                        target: node.id,        // Tabla con FK
+                        label: labelMap[field.relationType || "1-N"] || field.relationType || "1‒N",
+                        animated: edgeStyle.animated,
+                        style: { 
+                          stroke: edgeStyle.stroke, 
+                          strokeWidth: edgeStyle.strokeWidth,
+                          strokeDasharray: edgeStyle.strokeDasharray,
+                          // Agregar markerEnd desde el style si existe (para UML markers personalizados)
+                          ...(edgeStyle.style || {})
+                        },
+                        type: edgeStyle.type,
+                        labelStyle: { 
+                          fill: edgeStyle.stroke, 
+                          fontWeight: 700, 
+                          fontSize: 13,
+                          textShadow: "0 1px 3px rgba(0,0,0,0.8)"
+                        },
+                        labelBgStyle: edgeStyle.labelBgStyle,
+                        markerEnd: typeof edgeStyle.markerEnd === 'object' ? {
+                          type: (edgeStyle.markerEnd as any).type,
+                          color: (edgeStyle.markerEnd as any).color,
+                          width: 20,
+                          height: 20
+                        } : undefined,
+                        data: {
+                          sourceField: field.referencesField,  // Campo PK
+                          targetField: field.name,             // Campo FK
+                          relationType: field.relationType || "1-N"
+                        }
+                      };
+                      
+                      reconstructedEdges.push(reconstructedEdge);
                     }
                   }
                 });
@@ -366,11 +384,19 @@ export default function DiagramEditor() {
 
           case "ADD_EDGE":
             setEdges((eds) => {
-              if (eds.find((e) => e.id === payload.id)) {
+              // Verificar duplicados por ID o por source/target/tipo
+              const isDuplicate = eds.find((e) => 
+                e.id === payload.id ||
+                (e.source === payload.source && 
+                 e.target === payload.target && 
+                 e.data?.relationType === payload.data?.relationType)
+              );
+              
+              if (isDuplicate) {
                 console.warn("⚠️ [Editor] Edge already exists, skipping:", payload.id);
                 return eds;
               }
-              console.log("🔗 [Editor] Adding edge:", payload.id);
+              console.log("🔗 [Editor] Adding edge from socket:", payload.id);
               return [...eds, payload];
             });
             break;
@@ -550,7 +576,10 @@ export default function DiagramEditor() {
 
       if (!relationType) return; // Cancelado
 
-      const normalizedType = relationType.toUpperCase().trim();
+      // No normalizar el tipo, mantener el valor exacto del enum
+      const selectedType = relationType;
+      
+      console.log("🔗 [Editor] Selected relation type:", selectedType);
       
       // Obtener nodos source y target
       const sourceNode = nodes.find(n => n.id === connection.source);
@@ -562,7 +591,7 @@ export default function DiagramEditor() {
       }
 
       // 🎯 CREAR TABLA INTERMEDIA AUTOMÁTICA PARA N-N
-      if (normalizedType.includes("N-N") || normalizedType.includes("N:N") || normalizedType.includes("MANY")) {
+      if (selectedType === "N-N") {
         const sourceTableName = sourceNode.data.name || sourceNode.data.label || "tabla1";
         const targetTableName = targetNode.data.name || targetNode.data.label || "tabla2";
         
@@ -692,20 +721,90 @@ export default function DiagramEditor() {
         return; // No crear la relación directa N-N
       }
 
-      // 🔍 Detectar automáticamente PK/FK para relaciones 1-1 y 1-N
-      const { pkTable, fkTable } = determinePKFK(sourceNode, targetNode);
+      // 🔍 Detectar automáticamente PK/FK para relaciones que requieren FK
+      // UML tipos que NO requieren FK: DEPENDENCY, REALIZATION (solo visuales)
+      // INHERITANCE crea FK especial durante implementInheritance()
+      const requiresFK = !["DEPENDENCY", "REALIZATION"].includes(selectedType) && selectedType !== "INHERITANCE";
       
-      // Determinar tipo de relación
-      const detectedRelationType = normalizedType.includes("1-1") || normalizedType.includes("1:1") ? "1-1" : "1-N";
+      let pkTable = sourceNode;
+      let fkTable = targetNode;
+      let fkField = null;
+      let shouldInvertEdge = false; // Para AGGREGATION/COMPOSITION puede ser necesario invertir
       
-      // 🔗 Crear campo FK automáticamente en la tabla foránea
-      const fkField = createFKField(fkTable, pkTable, detectedRelationType);
+      // 🔼 Manejar HERENCIA: copiar campos del padre al hijo
+      if (selectedType === "INHERITANCE") {
+        // En herencia: source = clase hija, target = clase padre
+        const childTable = sourceNode;
+        const parentTable = targetNode;
+        
+        const { implementInheritance } = await import("../utils/relationHandler");
+        const inheritedFields = implementInheritance(childTable, parentTable);
+        
+        if (inheritedFields.length > 0) {
+          // Actualizar el nodo hijo con los campos heredados
+          setNodes((nds: Node[]) => 
+            nds.map((n: Node) => 
+              n.id === childTable.id 
+                ? { ...n, data: { ...n.data, fields: childTable.data.fields } }
+                : n
+            )
+          );
+
+          // Sincronizar el nodo actualizado
+          socket.emit("diagram-change", {
+            projectId: project.id,
+            action: "UPDATE_NODE",
+            payload: {
+              id: childTable.id,
+              data: childTable.data
+            },
+          });
+          
+          console.log(`✅ [Editor] Inheritance: ${childTable.data.name} extended with ${inheritedFields.length} fields from ${parentTable.data.name}`);
+        }
+      }
       
-      // 🆕 Detectar campos PK y FK para el edge
+      if (requiresFK) {
+        // 🎯 Lógica diferenciada según tipo UML:
+        
+        if (selectedType === "AGGREGATION" || selectedType === "COMPOSITION") {
+          // ◇/◆ AGREGACIÓN/COMPOSICIÓN:
+          // El rombo (markerEnd) indica el lado "todo" (whole)
+          // La FK SIEMPRE va en el lado "parte" (source)
+          // Target = Todo, Source = Parte
+          pkTable = targetNode;  // El todo tiene la PK
+          fkTable = sourceNode;  // La parte tiene la FK
+          
+          console.log(`🔷 [${selectedType}] Rombo en target (${targetNode.data.name}), FK en source (${sourceNode.data.name})`);
+          
+        } else {
+          // ASSOCIATION, 1-1, 1-N, N-N, FK:
+          // Usar lógica basada en handles (dónde conecta el usuario)
+          if (connection.targetHandle === 'top') {
+            // Conectó al handle superior del target → FK va en target
+            pkTable = sourceNode;
+            fkTable = targetNode;
+          } else if (connection.targetHandle === 'bottom') {
+            // Conectó al handle inferior del target → FK va en source
+            pkTable = targetNode;
+            fkTable = sourceNode;
+          } else {
+            // Fallback: usar la lógica original si no hay handles definidos
+            const detected = determinePKFK(sourceNode, targetNode);
+            pkTable = detected.pkTable;
+            fkTable = detected.fkTable;
+          }
+        }
+        
+        // 🔗 Crear campo FK automáticamente en la tabla foránea
+        fkField = createFKField(fkTable, pkTable, selectedType);
+      }
+      
+      // 🆕 Detectar campos PK y FK para el edge (solo si se creó FK)
       const pkField = pkTable.data.fields.find((f: any) => f.isPrimary);
       
-      if (fkField && pkField) {
-        console.log("✅ [Editor] Created FK field:", fkField.name, "in", fkTable.data.name, "type:", detectedRelationType);
+      if (fkField && pkField && requiresFK) {
+        console.log("✅ [Editor] Created FK field:", fkField.name, "in", fkTable.data.name, "type:", selectedType);
         console.log("🔗 [Editor] PK field:", pkField.name, "FK field:", fkField.name);
         
         // Actualizar el nodo con el nuevo campo
@@ -728,21 +827,38 @@ export default function DiagramEditor() {
         });
       }
 
-      // Obtener estilo según tipo de relación
-      const edgeStyle = getEdgeStyle(normalizedType.includes("1-1") || normalizedType.includes("1:1") ? "1-1" : "1-N");
+      // Obtener estilo según el tipo seleccionado (sin conversión)
+      const edgeStyle = getEdgeStyle(selectedType);
+      
+      // Mapear nombres de tipos UML a labels legibles
+      const labelMap: Record<string, string> = {
+        "1-1": "1‒1",
+        "1-N": "1‒N",
+        "N-N": "N‒N",
+        "ASSOCIATION": "Asociación",
+        "AGGREGATION": "Agregación",
+        "COMPOSITION": "Composición",
+        "INHERITANCE": "Herencia",
+        "DEPENDENCY": "Dependencia",
+        "REALIZATION": "Realización"
+      };
 
+      // 🎯 Mantener la dirección visual como el usuario la arrastró
+      // La semántica (dónde va la FK) ya está correctamente definida arriba
       const newEdge: Edge = {
-        id: `edge-${Date.now()}`,
-        source: pkTable.id,
-        target: fkTable.id,
+        id: `edge-${connection.source}-${connection.target}-${Date.now()}`,
+        source: connection.source!,
+        target: connection.target!,
         sourceHandle: connection.sourceHandle,
         targetHandle: connection.targetHandle,
-        label: normalizedType.includes("1-1") || normalizedType.includes("1:1") ? "1‒1" : "1‒N",
+        label: labelMap[selectedType] || selectedType,
         animated: edgeStyle.animated,
         style: { 
           stroke: edgeStyle.stroke, 
           strokeWidth: edgeStyle.strokeWidth,
-          strokeDasharray: edgeStyle.strokeDasharray
+          strokeDasharray: edgeStyle.strokeDasharray,
+          // Agregar markerEnd desde el style si existe (para UML markers personalizados)
+          ...(edgeStyle.style || {})
         },
         type: edgeStyle.type,
         labelStyle: { 
@@ -752,21 +868,21 @@ export default function DiagramEditor() {
           textShadow: "0 1px 3px rgba(0,0,0,0.8)"
         },
         labelBgStyle: edgeStyle.labelBgStyle,
-        markerEnd: {
-          type: 'arrowclosed',
-          color: edgeStyle.stroke,
+        markerEnd: typeof edgeStyle.markerEnd === 'object' ? {
+          type: (edgeStyle.markerEnd as any).type,
+          color: (edgeStyle.markerEnd as any).color,
           width: 20,
           height: 20
-        },
+        } : undefined,
         // 🆕 Agregar campos específicos a la edge
         data: {
           sourceField: pkField?.name, // Nombre del campo PK (ej: "id_proveedor")
           targetField: fkField?.name, // Nombre del campo FK (ej: "proveedor_id_proveedor")
-          relationType: detectedRelationType
+          relationType: selectedType
         }
       };
 
-      console.log("🔗 [Editor] Adding edge:", newEdge.id, "Type:", normalizedType, "Fields:", pkField?.name, "→", fkField?.name);
+      console.log("🔗 [Editor] Adding edge:", newEdge.id, "Type:", selectedType, "Fields:", pkField?.name, "→", fkField?.name);
       setEdges((eds: Edge[]) => addEdge(newEdge, eds));
 
       socket.emit("diagram-change", {
@@ -814,7 +930,7 @@ export default function DiagramEditor() {
         id: `edge-fk-${Date.now()}`,
         source: targetNode.id,
         target: sourceNodeId,
-        label: "1‒N",
+        label: "1‒N",  // Ya está en español
         animated: edgeStyle.animated,
         style: { 
           stroke: edgeStyle.stroke, 
@@ -1047,12 +1163,14 @@ export default function DiagramEditor() {
   // 🧠 AI Integration - Apply actions received from AI
   const applyAIActions = useCallback(
     async (actions: any[]) => {
-      console.log("🧠 [Editor] Applying AI actions:", actions);
+      console.log("🧠🧠🧠 [Editor] APPLYAIACTIONS CALLED WITH:", JSON.stringify(actions, null, 2));
 
       if (!actions || !Array.isArray(actions)) {
         console.warn("⚠️ [AI] No valid actions to apply");
         return;
       }
+      
+      console.log("✅ [Editor] Actions are valid array, processing...");
 
       // 🧩 Guardar temporalmente las acciones AddField para ejecutarlas al final
       const deferredAddFields: any[] = [];
@@ -1115,13 +1233,23 @@ export default function DiagramEditor() {
             }
 
             case "CreateRelation": {
-              // Buscar nodos source y target por nombre en updatedNodes
+              console.log(`🔍 [AI] Processing CreateRelation:`, action);
+              console.log(`🔍 [AI] Available nodes:`, updatedNodes.map(n => ({ id: n.id, name: n.data.name })));
+              
+              // Buscar nodos source y target por nombre en updatedNodes (case-insensitive)
               const sourceNode = updatedNodes.find(
-                (n) => n.data.name === action.fromTable || n.data.label === action.fromTable
+                (n) => 
+                  n.data.name?.toLowerCase() === action.fromTable?.toLowerCase() || 
+                  n.data.label?.toLowerCase() === action.fromTable?.toLowerCase()
               );
               const targetNode = updatedNodes.find(
-                (n) => n.data.name === action.toTable || n.data.label === action.toTable
+                (n) => 
+                  n.data.name?.toLowerCase() === action.toTable?.toLowerCase() || 
+                  n.data.label?.toLowerCase() === action.toTable?.toLowerCase()
               );
+
+              console.log(`🔍 [AI] Found sourceNode:`, sourceNode?.data.name);
+              console.log(`🔍 [AI] Found targetNode:`, targetNode?.data.name);
 
               if (!sourceNode || !targetNode) {
                 console.warn(
@@ -1130,18 +1258,131 @@ export default function DiagramEditor() {
                 break;
               }
 
-              // Mapear cardinalidad de IA a tipo de relación del sistema
-              let relationType = "1-N";
-              if (action.cardinality === "ONE_TO_ONE") relationType = "1-1";
-              if (action.cardinality === "ONE_TO_MANY") relationType = "1-N";
-              if (action.cardinality === "MANY_TO_MANY") relationType = "N-N";
+              // Determinar tipo de relación: priorizar relationType (UML 2.5) sobre cardinality
+              let relationType = "1-N"; // Default
+              
+              // Si hay relationType (INHERITANCE, COMPOSITION, etc.), usarlo directamente
+              if (action.relationType) {
+                relationType = action.relationType;
+              }
+              // Si no hay relationType pero hay cardinality, mapear cardinalidades clásicas
+              else if (action.cardinality) {
+                if (action.cardinality === "ONE_TO_ONE") relationType = "1-1";
+                if (action.cardinality === "ONE_TO_MANY") relationType = "1-N";
+                if (action.cardinality === "MANY_TO_MANY") relationType = "N-N";
+              }
 
               console.log(
                 `🔗 [AI] Creating ${relationType} relation: ${action.fromTable} → ${action.toTable}`
               );
 
+              // 🔼 Manejar HERENCIA: crear FK especial en hijo hacia padre
+              if (relationType === "INHERITANCE") {
+                console.log(`🔼 [AI] Processing INHERITANCE: ${sourceNode.data.name} → ${targetNode.data.name}`);
+                const childTable = sourceNode;  // fromTable = hijo
+                const parentTable = targetNode; // toTable = padre
+                
+                const { implementInheritance } = await import("../utils/relationHandler");
+                const inheritedFields = implementInheritance(childTable, parentTable);
+                console.log(`🔼 [AI] Inherited fields:`, inheritedFields);
+                
+                if (inheritedFields.length > 0) {
+                  // Actualizar referencia local
+                  updatedNodes = updatedNodes.map((n: Node) =>
+                    n.id === childTable.id
+                      ? { ...n, data: { ...n.data, fields: childTable.data.fields } }
+                      : n
+                  );
+                  
+                  // Actualizar el nodo hijo con el FK de herencia
+                  setNodes((nds: Node[]) => 
+                    nds.map((n: Node) => 
+                      n.id === childTable.id 
+                        ? { ...n, data: { ...n.data, fields: childTable.data.fields } }
+                        : n
+                    )
+                  );
+
+                  // Sincronizar el nodo actualizado
+                  socket.emit("diagram-change", {
+                    projectId: project.id,
+                    action: "UPDATE_NODE",
+                    payload: {
+                      id: childTable.id,
+                      data: childTable.data
+                    },
+                  });
+                  
+                  console.log(`✅ [AI] Inheritance: ${childTable.data.name} extended from ${parentTable.data.name}`);
+                }
+                
+                // Crear edge de herencia
+                const edgeStyle = getEdgeStyle("INHERITANCE");
+                const labelMap: Record<string, string> = {
+                  "1-1": "1‒1",
+                  "1-N": "1‒N",
+                  "N-N": "N‒N",
+                  "ASSOCIATION": "Asociación",
+                  "AGGREGATION": "Agregación",
+                  "COMPOSITION": "Composición",
+                  "INHERITANCE": "Herencia",
+                  "DEPENDENCY": "Dependencia",
+                  "REALIZATION": "Realización"
+                };
+                
+                const pkField = parentTable.data.fields.find((f: any) => f.isPrimary);
+                const fkField = childTable.data.fields.find((f: any) => 
+                  f.isForeign && f.references === parentTable.data.name
+                );
+                
+                const newEdge: Edge = {
+                  id: `edge-${Date.now()}`,
+                  source: childTable.id,
+                  target: parentTable.id,
+                  label: labelMap["INHERITANCE"],
+                  animated: edgeStyle.animated,
+                  style: {
+                    stroke: edgeStyle.stroke,
+                    strokeWidth: edgeStyle.strokeWidth,
+                    strokeDasharray: edgeStyle.strokeDasharray,
+                    ...(edgeStyle.style || {})
+                  },
+                  type: edgeStyle.type,
+                  labelStyle: {
+                    fill: edgeStyle.stroke,
+                    fontWeight: 700,
+                    fontSize: 13,
+                    textShadow: "0 1px 3px rgba(0,0,0,0.8)"
+                  },
+                  labelBgStyle: edgeStyle.labelBgStyle,
+                  markerEnd: typeof edgeStyle.markerEnd === 'object' ? {
+                    type: (edgeStyle.markerEnd as any).type,
+                    color: (edgeStyle.markerEnd as any).color,
+                    width: 20,
+                    height: 20
+                  } : undefined,
+                  data: {
+                    sourceField: fkField?.name,
+                    targetField: pkField?.name,
+                    relationType: "INHERITANCE",
+                    onDelete: action.onDelete || "CASCADE",
+                    onUpdate: action.onUpdate || "CASCADE"
+                  },
+                };
+
+                setEdges((eds: Edge[]) => [...eds, newEdge]);
+
+                socket.emit("diagram-change", {
+                  projectId: project.id,
+                  action: "ADD_EDGE",
+                  payload: newEdge,
+                });
+                
+                console.log(`✅ [AI] Created inheritance relation: ${action.fromTable} → ${action.toTable}`);
+                // No hacer break aquí, continuar al flujo normal
+              }
               // Para N-N, crear tabla intermedia automáticamente
-              if (relationType === "N-N") {
+              else if (relationType === "N-N") {
                 const sourcePK = sourceNode.data.fields.find((f: any) => f.isPrimary);
                 const targetPK = targetNode.data.fields.find((f: any) => f.isPrimary);
                 const sourcePKName = sourcePK?.name || "id";
@@ -1291,32 +1532,53 @@ export default function DiagramEditor() {
 
                   // Crear edge
                   const edgeStyle = getEdgeStyle(relationType);
+                  
+                  // Mapear tipo a label legible en español
+                  const labelMap: Record<string, string> = {
+                    "1-1": "1‒1",
+                    "1-N": "1‒N",
+                    "N-N": "N‒N",
+                    "ASSOCIATION": "Asociación",
+                    "AGGREGATION": "Agregación",
+                    "COMPOSITION": "Composición",
+                    "INHERITANCE": "Herencia",
+                    "DEPENDENCY": "Dependencia",
+                    "REALIZATION": "Realización"
+                  };
+                  
                   const newEdge: Edge = {
                     id: `edge-${Date.now()}`,
                     source: pkTable.id,
                     target: fkTable.id,
-                    label: relationType === "1-1" ? "1‒1" : "1‒N",
+                    label: labelMap[relationType] || relationType,
                     animated: edgeStyle.animated,
                     style: {
                       stroke: edgeStyle.stroke,
                       strokeWidth: edgeStyle.strokeWidth,
                       strokeDasharray: edgeStyle.strokeDasharray,
+                      // Agregar markerEnd desde el style si existe (para UML markers personalizados)
+                      ...(edgeStyle.style || {})
                     },
                     type: edgeStyle.type,
                     labelStyle: {
                       fill: edgeStyle.stroke,
                       fontWeight: 700,
                       fontSize: 13,
+                      textShadow: "0 1px 3px rgba(0,0,0,0.8)"
                     },
                     labelBgStyle: edgeStyle.labelBgStyle,
-                    markerEnd: {
-                      type: "arrowclosed",
-                      color: edgeStyle.stroke,
-                    },
+                    markerEnd: typeof edgeStyle.markerEnd === 'object' ? {
+                      type: (edgeStyle.markerEnd as any).type,
+                      color: (edgeStyle.markerEnd as any).color,
+                      width: 20,
+                      height: 20
+                    } : undefined,
                     data: {
                       sourceField: pkField?.name,
                       targetField: fkField?.name,
                       relationType,
+                      ...(action.onDelete && { onDelete: action.onDelete }),
+                      ...(action.onUpdate && { onUpdate: action.onUpdate }),
                     },
                   };
 
@@ -1336,13 +1598,231 @@ export default function DiagramEditor() {
 
             case "DeleteTable": {
               const nodeToDelete = updatedNodes.find(
-                (n) => n.data.name === action.name || n.data.label === action.name
+                (n) => 
+                  n.data.name?.toLowerCase() === action.name?.toLowerCase() || 
+                  n.data.label?.toLowerCase() === action.name?.toLowerCase()
               );
 
               if (nodeToDelete) {
                 updatedNodes = updatedNodes.filter((n) => n.id !== nodeToDelete.id);
                 handleDeleteNode(nodeToDelete.id);
                 console.log(`✅ [AI] Deleted table: ${action.name}`);
+              }
+              break;
+            }
+
+            case "DeleteRelation": {
+              const sourceNode = updatedNodes.find(
+                (n) => 
+                  n.data.name?.toLowerCase() === action.fromTable?.toLowerCase() || 
+                  n.data.label?.toLowerCase() === action.fromTable?.toLowerCase()
+              );
+              const targetNode = updatedNodes.find(
+                (n) => 
+                  n.data.name?.toLowerCase() === action.toTable?.toLowerCase() || 
+                  n.data.label?.toLowerCase() === action.toTable?.toLowerCase()
+              );
+
+              if (sourceNode && targetNode) {
+                // Buscar edge entre estas dos tablas (en cualquier dirección)
+                const edgeToDelete = edges.find(
+                  (e) =>
+                    (e.source === sourceNode.id && e.target === targetNode.id) ||
+                    (e.source === targetNode.id && e.target === sourceNode.id)
+                );
+
+                if (edgeToDelete) {
+                  setEdges((eds: Edge[]) => eds.filter((e) => e.id !== edgeToDelete.id));
+                  
+                  socket.emit("diagram-change", {
+                    projectId: project.id,
+                    action: "DELETE_EDGE",
+                    payload: { edgeId: edgeToDelete.id },
+                  });
+
+                  console.log(`✅ [AI] Deleted relation: ${action.fromTable} ↔ ${action.toTable}`);
+                } else {
+                  console.warn(`⚠️ [AI] Relation not found: ${action.fromTable} ↔ ${action.toTable}`);
+                }
+              }
+              break;
+            }
+
+            case "DeleteField": {
+              const targetNode = updatedNodes.find(
+                (n) => 
+                  n.data.name?.toLowerCase() === action.tableName?.toLowerCase() || 
+                  n.data.label?.toLowerCase() === action.tableName?.toLowerCase()
+              );
+
+              if (targetNode && action.fieldNames && Array.isArray(action.fieldNames)) {
+                const fieldsToDelete = new Set(action.fieldNames.map((f: string) => f.toLowerCase()));
+                const updatedFields = targetNode.data.fields.filter(
+                  (f: any) => !fieldsToDelete.has(f.name.toLowerCase())
+                );
+
+                // Actualizar referencia local
+                updatedNodes = updatedNodes.map((n: Node) =>
+                  n.id === targetNode.id
+                    ? { ...n, data: { ...n.data, fields: updatedFields } }
+                    : n
+                );
+
+                handleNodeUpdate(targetNode.id, { fields: updatedFields });
+                
+                console.log(`✅ [AI] Deleted ${action.fieldNames.length} field(s) from ${action.tableName}: ${action.fieldNames.join(", ")}`);
+              }
+              break;
+            }
+
+            case "RenameField": {
+              const targetNode = updatedNodes.find(
+                (n) => 
+                  n.data.name?.toLowerCase() === action.tableName?.toLowerCase() || 
+                  n.data.label?.toLowerCase() === action.tableName?.toLowerCase()
+              );
+
+              if (targetNode) {
+                const updatedFields = targetNode.data.fields.map((f: any) =>
+                  f.name.toLowerCase() === action.oldFieldName.toLowerCase()
+                    ? { ...f, name: action.newFieldName }
+                    : f
+                );
+
+                // Actualizar referencia local
+                updatedNodes = updatedNodes.map((n: Node) =>
+                  n.id === targetNode.id
+                    ? { ...n, data: { ...n.data, fields: updatedFields } }
+                    : n
+                );
+
+                handleNodeUpdate(targetNode.id, { fields: updatedFields });
+                
+                console.log(`✅ [AI] Renamed field in ${action.tableName}: ${action.oldFieldName} → ${action.newFieldName}`);
+              }
+              break;
+            }
+
+            case "ModifyField": {
+              const targetNode = updatedNodes.find(
+                (n) => 
+                  n.data.name?.toLowerCase() === action.tableName?.toLowerCase() || 
+                  n.data.label?.toLowerCase() === action.tableName?.toLowerCase()
+              );
+
+              if (targetNode) {
+                const updatedFields = targetNode.data.fields.map((f: any) => {
+                  if (f.name.toLowerCase() === action.fieldName.toLowerCase()) {
+                    return {
+                      ...f,
+                      ...(action.newType && { type: action.newType }),
+                      ...(action.nullable !== undefined && { nullable: action.nullable }),
+                      ...(action.isPrimary !== undefined && { isPrimary: action.isPrimary }),
+                    };
+                  }
+                  return f;
+                });
+
+                // Actualizar referencia local
+                updatedNodes = updatedNodes.map((n: Node) =>
+                  n.id === targetNode.id
+                    ? { ...n, data: { ...n.data, fields: updatedFields } }
+                    : n
+                );
+
+                handleNodeUpdate(targetNode.id, { fields: updatedFields });
+                
+                const changes = [];
+                if (action.newType) changes.push(`type→${action.newType}`);
+                if (action.nullable !== undefined) changes.push(`nullable→${action.nullable}`);
+                if (action.isPrimary !== undefined) changes.push(`isPrimary→${action.isPrimary}`);
+                
+                console.log(`✅ [AI] Modified field ${action.fieldName} in ${action.tableName}: ${changes.join(", ")}`);
+              }
+              break;
+            }
+
+            case "ModifyRelation": {
+              const sourceNode = updatedNodes.find(
+                (n) => 
+                  n.data.name?.toLowerCase() === action.fromTable?.toLowerCase() || 
+                  n.data.label?.toLowerCase() === action.fromTable?.toLowerCase()
+              );
+              const targetNode = updatedNodes.find(
+                (n) => 
+                  n.data.name?.toLowerCase() === action.toTable?.toLowerCase() || 
+                  n.data.label?.toLowerCase() === action.toTable?.toLowerCase()
+              );
+
+              if (sourceNode && targetNode) {
+                const edgeToModify = edges.find(
+                  (e) =>
+                    (e.source === sourceNode.id && e.target === targetNode.id) ||
+                    (e.source === targetNode.id && e.target === sourceNode.id)
+                );
+
+                if (edgeToModify) {
+                  // Determinar el nuevo tipo de relación
+                  const newRelationType = action.relationType || edgeToModify.data?.relationType || "1-N";
+                  const edgeStyle = getEdgeStyle(newRelationType);
+                  
+                  const labelMap: Record<string, string> = {
+                    "1-1": "1‒1",
+                    "1-N": "1‒N",
+                    "N-N": "N‒N",
+                    "ASSOCIATION": "Asociación",
+                    "AGGREGATION": "Agregación",
+                    "COMPOSITION": "Composición",
+                    "INHERITANCE": "Herencia",
+                    "DEPENDENCY": "Dependencia",
+                    "REALIZATION": "Realización"
+                  };
+
+                  const modifiedEdge = {
+                    ...edgeToModify,
+                    label: labelMap[newRelationType] || newRelationType,
+                    animated: edgeStyle.animated,
+                    style: {
+                      stroke: edgeStyle.stroke,
+                      strokeWidth: edgeStyle.strokeWidth,
+                      strokeDasharray: edgeStyle.strokeDasharray,
+                      ...(edgeStyle.style || {})
+                    },
+                    labelStyle: {
+                      fill: edgeStyle.stroke,
+                      fontWeight: 700,
+                      fontSize: 13,
+                      textShadow: "0 1px 3px rgba(0,0,0,0.8)"
+                    },
+                    labelBgStyle: edgeStyle.labelBgStyle,
+                    markerEnd: typeof edgeStyle.markerEnd === 'object' ? {
+                      type: (edgeStyle.markerEnd as any).type,
+                      color: (edgeStyle.markerEnd as any).color,
+                      width: 20,
+                      height: 20
+                    } : undefined,
+                    data: {
+                      ...edgeToModify.data,
+                      relationType: newRelationType,
+                      ...(action.onDelete && { onDelete: action.onDelete }),
+                      ...(action.onUpdate && { onUpdate: action.onUpdate }),
+                    },
+                  };
+
+                  setEdges((eds: Edge[]) =>
+                    eds.map((e) => (e.id === edgeToModify.id ? modifiedEdge : e))
+                  );
+
+                  socket.emit("diagram-change", {
+                    projectId: project.id,
+                    action: "UPDATE_EDGE",
+                    payload: modifiedEdge,
+                  });
+
+                  console.log(`✅ [AI] Modified relation: ${action.fromTable} ↔ ${action.toTable} → ${newRelationType}`);
+                } else {
+                  console.warn(`⚠️ [AI] Relation not found to modify: ${action.fromTable} ↔ ${action.toTable}`);
+                }
               }
               break;
             }
@@ -1362,7 +1842,9 @@ export default function DiagramEditor() {
       for (const renameAction of deferredRenames) {
         try {
           const nodeToRename = updatedNodes.find(
-            (n) => n.data.name === renameAction.oldName || n.data.label === renameAction.oldName
+            (n) => 
+              n.data.name?.toLowerCase() === renameAction.oldName?.toLowerCase() || 
+              n.data.label?.toLowerCase() === renameAction.oldName?.toLowerCase()
           );
 
           if (nodeToRename) {
@@ -1409,7 +1891,9 @@ export default function DiagramEditor() {
           }
 
           const targetNode = updatedNodes.find(
-            (n) => n.data.name === tableName || n.data.label === tableName
+            (n) => 
+              n.data.name?.toLowerCase() === tableName?.toLowerCase() || 
+              n.data.label?.toLowerCase() === tableName?.toLowerCase()
           );
 
           if (!targetNode) {
@@ -1454,6 +1938,7 @@ export default function DiagramEditor() {
     },
     [
       nodes,
+      edges,
       project,
       setNodes,
       setEdges,
@@ -1709,6 +2194,12 @@ export default function DiagramEditor() {
             />
             <Controls />
             <Background gap={16} color="#333" />
+            <DownloadButton />
+            
+            {/* SVG Markers para UML 2.5 y Crow's Foot */}
+            <svg style={{ position: "absolute", width: 0, height: 0 }}>
+              <defs dangerouslySetInnerHTML={{ __html: UML_SVG_MARKERS }} />
+            </svg>
           </ReactFlow>
         </div>
 

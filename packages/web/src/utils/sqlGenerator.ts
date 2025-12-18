@@ -21,7 +21,14 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
   const generateTableSQL = (node: Node): { 
     tableName: string; 
     sql: string; 
-    foreignKeys: string[];
+    foreignKeys: Array<{
+      field: string;
+      references: string;
+      referencesField?: string;
+      onDelete?: string;
+      onUpdate?: string;
+      relationType?: string;
+    }>;
     hasFK: boolean;
   } => {
     const data = node.data as TableData;
@@ -32,7 +39,14 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
     
     const columns: string[] = [];
     const primaryKeys: string[] = [];
-    const foreignKeys: { field: string; references: string }[] = [];
+    const foreignKeys: Array<{
+      field: string;
+      references: string;
+      referencesField?: string;
+      onDelete?: string;
+      onUpdate?: string;
+      relationType?: string;
+    }> = [];
     const referencedTables: string[] = [];
 
     // Detectar si es join table pura (solo 2 FKs, sin columnas adicionales)
@@ -59,9 +73,14 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
 
       if (field.isForeign && field.references) {
         const refTable = field.references.toLowerCase().replace(/\s+/g, '_');
+        const refField = field.referencesField || 'id';
         foreignKeys.push({
           field: columnName,
-          references: refTable
+          references: refTable,
+          referencesField: refField,
+          onDelete: field.onDelete || "CASCADE",
+          onUpdate: field.onUpdate || "CASCADE",
+          relationType: field.relationType
         });
         referencedTables.push(refTable);
       }
@@ -79,7 +98,16 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
     }
 
     foreignKeys.forEach(fk => {
-      tableSql += `,\n  FOREIGN KEY (${fk.field}) REFERENCES ${fk.references}(id) ON DELETE CASCADE`;
+      const onDelete = fk.onDelete || "CASCADE";
+      const onUpdate = fk.onUpdate || "CASCADE";
+      const refField = fk.referencesField || 'id';
+      
+      // Comentario UML si existe
+      const comment = fk.relationType && !["1-1", "1-N", "N-N", "FK"].includes(fk.relationType)
+        ? ` -- ${fk.relationType}`
+        : '';
+      
+      tableSql += `,\n  FOREIGN KEY (${fk.field}) REFERENCES ${fk.references}(${refField}) ON DELETE ${onDelete} ON UPDATE ${onUpdate}${comment}`;
     });
 
     tableSql += "\n);\n\n";
@@ -87,7 +115,7 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
     return {
       tableName,
       sql: tableSql,
-      foreignKeys: referencedTables,
+      foreignKeys: foreignKeys.map(fk => fk.references), // Solo los nombres de las tablas referenciadas
       hasFK: referencedTables.length > 0
     };
   };
