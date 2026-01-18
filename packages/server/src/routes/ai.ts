@@ -178,12 +178,12 @@ router.post("/parse-image", async (req, res) => {
       return res.status(400).json({ error: "Image data cannot be empty" });
     }
 
-    // Validar tamaño aproximado (5MB en base64 = ~6.67MB raw)
+    // Validar tamaño aproximado (10MB en base64 = ~13.33MB raw)
     const sizeInMB = (imageBase64.length * 0.75) / (1024 * 1024);
-    if (sizeInMB > 5) {
+    if (sizeInMB > 10) {
       console.warn(`[AI Image Route] Image too large: ${sizeInMB.toFixed(2)}MB`);
       return res.status(400).json({ 
-        error: "Image too large (max 5MB)",
+        error: "Image too large (max 10MB)",
         details: `Image size: ${sizeInMB.toFixed(2)}MB`
       });
     }
@@ -203,6 +203,31 @@ router.post("/parse-image", async (req, res) => {
 
     // Llamar al servicio de IA con visión
     const result = await parseImageIntent(imageBase64);
+
+    // 🔧 Post-procesamiento: Agregar campo id por defecto a tablas vacías
+    result.actions.forEach((action: any) => {
+      if (action.type === "CreateTable") {
+        // Verificar si fields está vacío, es null, o no existe
+        if (!action.fields || !Array.isArray(action.fields) || action.fields.length === 0) {
+          console.log(`🔧 [AI Auto-Fix] Adding default id field to table '${action.name}' (had ${action.fields?.length || 0} fields)`);
+          action.fields = [
+            {
+              name: "id",
+              type: "INT",
+              isPrimary: true,
+              nullable: false
+            }
+          ];
+        }
+      }
+    });
+
+    console.log(`🔍 [AI Debug] Total actions: ${result.actions.length}`);
+    result.actions.forEach((action: any, idx: number) => {
+      if (action.type === "CreateTable") {
+        console.log(`  Action ${idx}: CreateTable '${action.name}' with ${action.fields?.length || 0} field(s)`);
+      }
+    });
 
     // Validar acciones generadas
     const validation = validateActions(result.actions);

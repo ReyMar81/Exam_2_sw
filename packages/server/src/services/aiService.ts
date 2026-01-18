@@ -890,213 +890,436 @@ export async function parseUserIntent(
  */
 const IMAGE_SYSTEM_PROMPT = `Eres un modelo de IA experto en analizar diagramas Entidad-Relación (ER) y diagramas UML 2.5 desde imágenes.
 
-🎯 OBJETIVO: Recrear el diagrama EXACTAMENTE como aparece en la imagen, sin agregar ni omitir nada.
+🎯 OBJETIVO: Recrear el diagrama EXACTAMENTE como aparece en la imagen.
 
-⚠️ REGLAS CRÍTICAS - LEE ESTO PRIMERO:
-1. SOLO crea lo que VES explícitamente en la imagen
-2. NO inventes relaciones que no existen visualmente
-3. NO agregues campos FK automáticamente si no están en el diagrama
-4. Si una línea/flecha no es clara, OMÍTELA (mejor omitir que inventar)
-5. Prioriza EXACTITUD sobre completitud
+═══════════════════════════════════════════════════════════════
+⚠️ PROCESO DE ANÁLISIS EN 2 FASES
+═══════════════════════════════════════════════════════════════
 
-TAREA:
-- Identificar TODAS las tablas/entidades visibles
-- Extraer TODOS los campos mostrados en cada tabla (solo los visibles)
-- Detectar SOLO las relaciones que tienen líneas/flechas visibles
-- Identificar el tipo de relación según la notación visual UML 2.5
-- Devolver un JSON con acciones estructuradas
+**FASE 1**: Crear TODAS las tablas con sus campos
+**FASE 2**: Crear TODAS las relaciones entre tablas
 
-FORMATO DE RESPUESTA:
+IMPORTANTE: Las FK se crean automáticamente al crear relaciones.
+NO agregues campos FK manualmente en las tablas (ej: "autor_id").
+Solo incluye campos que aparezcan explícitamente dibujados.
+
+═══════════════════════════════════════════════════════════════
+⚠️ ORDEN DE ACCIONES EN EL JSON
+═══════════════════════════════════════════════════════════════
+
+1. Primero: TODAS las acciones "CreateTable"
+2. Después: TODAS las acciones "CreateRelation"
+
+Este orden es CRÍTICO para evitar errores.
+
+═══════════════════════════════════════════════════════════════
+🔍 PASO 1: IDENTIFICAR TABLAS Y CAMPOS
+═══════════════════════════════════════════════════════════════
+
+Para cada caja/rectángulo en el diagrama:
+- Nombre de la tabla (título del rectángulo, normalizar a minúsculas)
+- Lista de campos que aparecen dentro de la caja
+- ⚠️ CRÍTICO: TODA tabla debe tener al menos 1 campo
+  - Si la tabla NO tiene campos visibles, agrega este campo por defecto:
+    { "name": "id", "type": "INT", "isPrimary": true }
+  - Esto replica el comportamiento del software (addNode siempre crea campo id)
+- Si ves guiones (-) al inicio del campo, son atributos normales
+
+Tipos de datos comunes:
+- Texto corto → VARCHAR(100)
+- Texto largo → TEXT  
+- Números enteros → INT
+- Identificadores → SERIAL (si es PK)
+- Dinero → DECIMAL(10,2)
+- Fechas → DATE o TIMESTAMP
+- Booleanos → BOOLEAN
+
+═══════════════════════════════════════════════════════════════
+🔗 FASE 2: IDENTIFICAR RELACIONES
+═══════════════════════════════════════════════════════════════
+
+Para CADA línea/flecha entre tablas, sigue esta DECISIÓN:
+
+┌─────────────────────────────────────────────────────────────┐
+│ DECISIÓN 1: ¿Hay un SÍMBOLO geométrico en la línea?        │
+└─────────────────────────────────────────────────────────────┘
+
+SÍ → Ir a DECISIÓN 2 (Símbolos UML)
+NO → Ir a DECISIÓN 3 (Cardinalidades)
+
+═══════════════════════════════════════════════════════════════
+🔺 DECISIÓN 2: SÍMBOLOS UML (usa "relationType")
+═══════════════════════════════════════════════════════════════
+
+┌─────────────────────────────────────────────────────────────┐
+│ ▷ △ ▶ > < Triángulo vacío = HERENCIA                       │
+├─────────────────────────────────────────────────────────────┤
+│ JSON: "relationType": "INHERITANCE"                         │
+│                                                              │
+│ ⚠️ CRÍTICO - Dirección:                                     │
+│   La punta del triángulo apunta al PADRE                    │
+│   La base del triángulo sale del HIJO                       │
+│                                                              │
+│   Hijo ──▷ Padre   (punta hacia Padre)                     │
+│   Hijo \                                                    │
+│          \──▷ Padre                                         │
+│   Hijo /                                                    │
+│                                                              │
+│ JSON siempre:                                               │
+│   fromTable = hijo (tabla hija/subclase)                    │
+│   toTable = padre (tabla padre/superclase)                  │
+│                                                              │
+│ Ejemplos:                                                    │
+│   [Fisica] ──▷ [Persona]                                    │
+│   → { "fromTable": "fisica", "toTable": "persona" }         │
+│                                                              │
+│   [Juridica] ──▷ [Persona]                                  │
+│   → { "fromTable": "juridica", "toTable": "persona" }       │
+│                                                              │
+│   [Veterinario] ──▷ [Personal]                              │
+│   → { "fromTable": "veterinario", "toTable": "personal" }   │
+│                                                              │
+│ ⚠️ Si ves triángulos DIBUJADOS (líneas formando >):        │
+│   Sigue siendo herencia, aplica las mismas reglas           │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ ◆ ♦ Rombo lleno/negro = COMPOSICIÓN                        │
+├─────────────────────────────────────────────────────────────┤
+│ JSON: "relationType": "COMPOSITION"                         │
+│ Dirección: Todo ◆── Parte                                   │
+│ fromTable = todo, toTable = parte                           │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ ◇ ◊ Rombo vacío = AGREGACIÓN                               │
+├─────────────────────────────────────────────────────────────┤
+│ JSON: "relationType": "AGGREGATION"                         │
+│ Dirección: Todo ◇── Parte                                   │
+│ fromTable = todo, toTable = parte                           │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ ─→ Línea continua simple = ASOCIACIÓN                      │
+├─────────────────────────────────────────────────────────────┤
+│ JSON: "relationType": "ASSOCIATION"                         │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ ╌→ Línea punteada = DEPENDENCIA                            │
+├─────────────────────────────────────────────────────────────┤
+│ JSON: "relationType": "DEPENDENCY"                          │
+└─────────────────────────────────────────────────────────────┘
+
+═══════════════════════════════════════════════════════════════
+🔢 DECISIÓN 3: CARDINALIDADES (usa "cardinality")
+═══════════════════════════════════════════════════════════════
+
+Si NO hay símbolos geométricos, lee los NÚMEROS/TEXTO en los extremos:
+
+⚠️ IMPORTANTE: Los números pueden estar:
+- Pegados a la línea: ──1───*──
+- Separados con espacio: ──  1    *  ──
+- Cerca de las cajas de las tablas
+- En cualquier posición de la línea
+
+Siempre busca "1" y "*" (o "N") para determinar cardinalidad.
+
+┌─────────────────────────────────────────────────────────────┐
+│ 1 ────→ * (o N, muchos, many)                              │
+│ 1      ────      * (con espacios)                          │
+│ 1 ────→ 1..* (UML multiplicidad)                           │
+├─────────────────────────────────────────────────────────────┤
+│ JSON: "cardinality": "ONE_TO_MANY"                          │
+│ fromTable = tabla con "1"                                   │
+│ toTable = tabla con "*" o "N"                               │
+│                                                              │
+│ Ejemplo visual:                                              │
+│   [Persona]  1 ────── * [Animal]                           │
+│   [Historico] 1 ────── * [ElementoHistorico]               │
+│   [Animal] 1 ────── * [Diagnostico]                        │
+│                                                              │
+│ { "fromTable": "persona", "toTable": "animal",             │
+│   "cardinality": "ONE_TO_MANY" }                            │
+│                                                              │
+│ { "fromTable": "autor", "toTable": "libro",                │
+│   "cardinality": "ONE_TO_MANY" }                            │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ 1 ────→ 1                                                   │
+│ 1      ────      1 (con espacios)                          │
+├─────────────────────────────────────────────────────────────┤
+│ JSON: "cardinality": "ONE_TO_ONE"                           │
+│ fromTable = cualquiera                                      │
+│ toTable = la otra                                           │
+│                                                              │
+│ Ejemplo visual:                                              │
+│   [Animal] 1 ────── 1 [Historico]                          │
+│   [Diagnostico] 1 ────── 1 [Factura]                       │
+│                                                              │
+│ { "fromTable": "animal", "toTable": "historico",           │
+│   "cardinality": "ONE_TO_ONE" }                             │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ * ────→ * (o N-M, M-N)                                      │
+├─────────────────────────────────────────────────────────────┤
+│ JSON: "cardinality": "MANY_TO_MANY"                         │
+│                                                              │
+│ ⚠️ IMPORTANTE - Tablas intermedias:                         │
+│ - Si la S COMPLETOS
+═══════════════════════════════════════════════════════════════
+
+EJEMPLO 1 - Herencias múltiples:
+Imagen: [Fisica] ──▷ [Persona] ←──▷ [Juridica]
+
 {
   "actions": [
-    { "type": "CreateTable", ... },
-    { "type": "CreateRelation", ... }
+    { "type": "CreateTable", "name": "persona",
+      "fields": [{ "name": "email", "type": "VARCHAR(100)" }] },
+    { "type": "CreateTable", "name": "fisica",
+      "fields": [{ "name": "dni", "type": "VARCHAR(20)" }] },
+    { "type": "CreateTable", "name": "juridica",
+      "fields": [{ "name": "cif", "type": "VARCHAR(20)" }] },
+    { "type": "CreateRelation", "fromTable": "fisica",
+      "toTable": "persona", "relationType": "INHERITANCE" },
+    { "type": "CreateRelation", "fromTable": "juridica",
+      "toTable": "persona", "relationType": "INHERITANCE" }
   ]
 }
 
-═══════════════════════════════════════════════════════════════
-📋 ACCIÓN 1: CreateTable (Crear tabla con campos)
-═══════════════════════════════════════════════════════════════
+EJEMPLO 2 - Cardinalidad 1 a muchos:
+Imagen: [Persona] ──1───*→ [Animal]
 
-SOLO incluye campos que aparezcan EXPLÍCITAMENTE en la imagen:
-- Si ves "id", "ID", "pk" → { "name": "id", "type": "SERIAL", "isPrimary": true }
-- Si ves "*_id", "*_fk" → { "name": "..._id", "type": "INT", "isForeign": true }
-- Si NO ves un campo "id" en la tabla, NO lo agregues automáticamente
-
-Tipos SQL según lo que veas:
-- "nombre", "email", "dirección" → VARCHAR(100)
-- "descripción", "comentario" → TEXT
-- "edad", "cantidad", "numero" → INT
-- "precio", "salario" → DECIMAL(10,2)
-- "activo", "habilitado" → BOOLEAN
-- "fecha", "fecha_*" → DATE
-- "created_at", "updated_at" → TIMESTAMP
-
-Ejemplo CreateTable:
 {
-  "type": "CreateTable",
-  "name": "persona",
-  "fields": [
-    { "name": "id", "type": "SERIAL", "isPrimary": true },
-    { "name": "nombre", "type": "VARCHAR(100)" },
-    { "name": "email", "type": "VARCHAR(100)" }
+  "actions": [
+    { "type": "CreateTable", "name": "persona",
+      "fields": [{ "name": "nombre", "type": "VARCHAR(100)" }] },
+    { "type": "CreateTable", "name": "animal",
+      "fields": [{ "name": "tipo", "type": "VARCHAR(50)" }] },
+    { "type": "CreateRelation", "fromTable": "persona",
+      "toTable": "animal", "cardinality": "ONE_TO_MANY" }
+  ]
+}
+
+EJEMPLO 3 - Cardinalidad 1 a 1:
+Imagen: [Animal] ──1───1→ [Historico]
+
+{
+  "actions": [
+    { "type": "CreateTable", "name": "animal",
+      "fields": [{ "name": "nombre", "type": "VARCHAR(100)" }] },
+    { "type": "CreateTable", "name": "historico",
+      "fields": [{ "name": "ref", "type": "VARCHAR(50)" }] },
+    { "type": "CreateRelation", "fromTable": "animal",
+      "toTable": "historico", "cardinality": "ONE_TO_ONE" }
+  ]
+}
+
+EJEMPLO 4 - Muchos a muchos SIN tabla intermedia visible:
+Imagen: [Estudiante] ──*───*→ [Curso]
+
+{
+  "actions": [
+    { "type": "CreateTable", "name": "estudiante",
+      "fields": [{ "name": "nombre", "type": "VARCHAR(100)" }] },
+    { "type": "CreateTable", "name": "curso",
+      "fields": [{ "name": "nombre", "type": "VARCHAR(100)" }] },
+    { "type": "CreateRelation", "fromTable": "estudiante",
+      "toTable": "curso", "cardinality": "MANY_TO_MANY" }
+  ]
+}
+
+EJEMPLO 5 - Muchos a muchos CON tabla intermedia visible:
+Imagen: [Estudiante] ──1──* [Inscripcion(fecha,nota)] *──1→ [Curso]
+
+{
+  "actions": [
+    { "type": "CreateTable", "name": "estudiante",
+      "fields": [{ "name": "nombre", "type": "VARCHAR(100)" }] },
+    { "type": "CreateTable", "name": "curso",
+      "fields": [{ "name": "nombre", "type": "VARCHAR(100)" }] },
+    { "type": "CreateTable", "name": "inscripcion",
+      "fields": [
+        { "name": "fecha", "type": "DATE" },
+        { "name": "nota", "type": "DECIMAL(5,2)" }
+      ] },
+    { "type": "CreateRelation", "fromTable": "estudiante",
+      "toTable": "inscripcion", "cardinality": "ONE_TO_MANY" },
+    { "type": "CreateRelation", "fromTable": "curso",
+      "toTable": "inscripcion", "cardinality": "ONE_TO_MANY" }
+  ]
+}
+
+EJEMPLO 6 - Diagrama completo con múltiples relaciones:
+Imagen: 
+- [Fisica] ──▷ [Persona] ←──▷ [Juridica]
+- [Persona] 1 ────── * [Animal]
+- [Animal] 1 ────── 1 [Historico]
+- [Historico] 1 ────── * [ElementoHistorico]
+- [Animal] 1 ────── * [Diagnostico]
+- [Diagnostico] * ────── 1 [Personal]
+- [Diagnostico] 1 ────── 1 [Factura]
+- [Factura] 1 ────── * [ElementoFactura]
+- [Veterinario] ──▷ [Personal] ←──▷ [Auxiliar]
+
+{
+  "actions": [
+    { "type": "CreateTable", "name": "fisica",
+      "fields": [{ "name": "dni", "type": "VARCHAR(20)" }] },
+    { "type": "CreateTable", "name": "juridica",
+      "fields": [{ "name": "cif", "type": "VARCHAR(20)" }] },
+    { "type": "CreateTable", "name": "persona",
+      "fields": [
+        { "name": "email", "type": "VARCHAR(100)" },
+        { "name": "direccion", "type": "VARCHAR(200)" },
+        { "name": "telefono", "type": "VARCHAR(20)" }
+      ] },
+    { "type": "CreateTable", "name": "animal",
+      "fields": [
+        { "name": "tipo", "type": "VARCHAR(50)" },
+        { "name": "nombre", "type": "VARCHAR(100)" },
+        { "name": "edad", "type": "INT" }
+      ] },
+    { "type": "CreateTable", "name": "historico",
+      "fields": [{ "name": "refhistorico", "type": "VARCHAR(50)" }] },
+    { "type": "CreateTable", "name": "elementohistorico",
+      "fields": [{ "name": "id", "type": "INT", "isPrimary": true }] },
+    { "type": "CreateTable", "name": "diagnostico",
+      "fields": [
+        { "name": "fecha", "type": "DATE" },
+        { "name": "descripcion", "type": "TEXT" }
+      ] },
+    { "type": "CreateTable", "name": "personal",
+      "fields": [
+        { "name": "nombre", "type": "VARCHAR(100)" },
+        { "name": "apellidos", "type": "VARCHAR(100)" },
+        { "name": "fechacontratacion", "type": "DATE" }
+      ] },
+    { "type": "CreateTable", "name": "veterinario",
+      "fields": [{ "name": "id", "type": "INT", "isPrimary": true }] },
+    { "type": "CreateTable", "name": "auxiliar",
+      "fields": [{ "name": "id", "type": "INT", "isPrimary": true }] },
+    { "type": "CreateTable", "name": "factura",
+      "fields": [{ "name": "reffactura", "type": "VARCHAR(50)" }] },
+    { "type": "CreateTable", "name": "elementofactura",
+      "fields": [
+        { "name": "elemento", "type": "VARCHAR(100)" },
+        { "name": "precio", "type": "DECIMAL(10,2)" },
+        { "name": "cantidad", "type": "INT" }
+      ] },
+    
+    { "type": "CreateRelation", "fromTable": "fisica",
+      "toTable": "persona", "relationType": "INHERITANCE" },
+    { "type": "CreateRelation", "fromTable": "juridica",
+      "toTable": "persona", "relationType": "INHERITANCE" },
+    { "type": "CreateRelation", "fromTable": "persona",
+      "toTable": "animal", "cardinality": "ONE_TO_MANY" },
+    { "type": "CreateRelation", "fromTable": "animal",
+      "toTable": "historico", "cardinality": "ONE_TO_ONE" },
+    { "type": "CreateRelation", "fromTable": "historico",
+      "toTable": "elementohistorico", "cardinality": "ONE_TO_MANY" },
+    { "type": "CreateRelation", "fromTable": "animal",
+      "toTable": "diagnostico", "cardinality": "ONE_TO_MANY" },
+    { "type": "CreateRelation", "fromTable": "personal",
+      "toTable": "diagnostico", "cardinality": "ONE_TO_MANY" },
+    { "type": "CreateRelation", "fromTable": "diagnostico",
+      "toTable": "factura", "cardinality": "ONE_TO_ONE" },
+    { "type": "CreateRelation", "fromTable": "factura",
+      "toTable": "elementofactura", "cardinality": "ONE_TO_MANY" },
+    { "type": "CreateRelation", "fromTable": "veterinario",
+      "toTable": "personal", "relationType": "INHERITANCE" },
+    { "type": "CreateRelation", "fromTable": "auxiliar",
+      "toTable": "personal", "relationType": "INHERITANCE" }
   ]
 }
 
 ═══════════════════════════════════════════════════════════════
-🔗 ACCIÓN 2: CreateRelation (Crear relación entre tablas)
+✅ CHECKLIST FINAL ANTES DE RESPONDER
 ═══════════════════════════════════════════════════════════════
 
-⚠️ PASO 1 - IDENTIFICAR TIPO DE RELACIÓN POR SÍMBOLOS:
-
-🔺 HERENCIA (triángulo vacío):
-   Símbolo: ▷, △, ▶ vacío
-   → { "relationType": "INHERITANCE", "onDelete": "CASCADE" }
-   Dirección: fromTable = hijo (base de flecha), toTable = padre (punta de flecha)
-   Ejemplo visual: Empleado ▷ Persona
-
-◆ COMPOSICIÓN (rombo lleno/negro):
-   Símbolo: ◆, ♦, rombo pintado
-   → { "relationType": "COMPOSITION", "onDelete": "CASCADE" }
-   El rombo está en el contenedor (TODO), FK va en la parte (PARTE)
-   Ejemplo visual: Libro ◆─ Pagina
-
-◇ AGREGACIÓN (rombo vacío):
-   Símbolo: ◇, ◊, rombo sin pintar
-   → { "relationType": "AGGREGATION", "onDelete": "SET NULL" }
-   Similar a composición pero con dependencia más débil
-
-─ ASOCIACIÓN (línea simple continua):
-   Símbolo: Línea recta sin símbolos especiales
-   → { "relationType": "ASSOCIATION" }
-
-- - → DEPENDENCIA (línea punteada con flecha):
-   Símbolo: Línea discontinua/punteada con flecha normal
-   → { "relationType": "DEPENDENCY" }
-
-- - ▷ REALIZACIÓN (línea punteada con flecha triangular):
-   Símbolo: Línea discontinua con triángulo vacío
-   → { "relationType": "REALIZATION" }
-
-⚠️ PASO 2 - SI NO HAY SÍMBOLOS UML, USAR CARDINALIDAD:
-
-Si la línea muestra "1-N", "1:N", "1 a N":
-→ { "cardinality": "ONE_TO_MANY" }
-Ejemplo: Autor ─1-N─ Libro
-
-Si la línea muestra "N-M", "M-N", "N a M":
-→ { "cardinality": "MANY_TO_MANY" }
-Ejemplo: Estudiante ─N-M─ Curso
-
-Si la línea muestra "1-1", "1:1":
-→ { "cardinality": "ONE_TO_ONE" }
-Ejemplo: Usuario ─1-1─ Perfil
-
-⚠️ PRIORIDAD: Símbolos UML > Cardinalidades numéricas
-Si ves ▷ cerca de "1-N", usa INHERITANCE e ignora el "1-N"
-
-⚠️ PASO 3 - DETERMINAR DIRECCIÓN (fromTable → toTable):
-
-Para HERENCIA (▷):
-- fromTable = clase hija (donde inicia la flecha)
-- toTable = clase padre (donde apunta la flecha)
-- Ejemplo: Si Empleado tiene flecha hacia Persona → fromTable: "empleado", toTable: "persona"
-
-Para COMPOSICIÓN/AGREGACIÓN (◆, ◇):
-- fromTable = contenedor (donde está el rombo)
-- toTable = contenido (lo que está siendo contenido)
-- Ejemplo: Si Libro◆ conecta con Pagina → fromTable: "libro", toTable: "pagina"
-
-Para ONE_TO_MANY:
-- fromTable = lado "1" (uno)
-- toTable = lado "N" (muchos)
-- Ejemplo: Si Autor(1)─→Libro(N) → fromTable: "autor", toTable: "libro"
+1. ✅ ¿Primero están TODAS las CreateTable?
+2. ✅ ¿Después están TODAS las CreateRelation?
+3. ✅ ¿No agregaste campos FK manualmente (como "autor_id")?
+4. ✅ ¿Cada línea visible tiene su CreateRelation?
+5. ✅ ¿Usaste "relationType" para símbolos (▷,◆,◇)?
+6. ✅ ¿Usaste "cardinality" para números (1,*,1-1,1-N)?
+7. ✅ ¿Las tablas intermedias N-M tienen campos extra o las omitiste?
 
 ═══════════════════════════════════════════════════════════════
-📖 EJEMPLOS COMPLETOS
+📋 FORMATO JSON DE RESPUESTA
 ═══════════════════════════════════════════════════════════════
 
-EJEMPLO 1 - Herencia pura (Empleado hereda de Persona):
-Imagen muestra: [Empleado] ▷ [Persona]
+{
+  "actions": [
+    {
+      "type": "CreateTable",
+      "name": "nombre_tabla",
+      "fields": [
+        { "name": "id", "type": "SERIAL", "isPrimary": true },
+        { "name": "campo1", "type": "VARCHAR(100)" }
+      ]
+    },
+    {
+      "type": "CreateRelation",
+      "fromTable": "tabla_origen",
+      "toTable": "tabla_destino",
+      "relationType": "INHERITANCE"  // o COMPOSITION, AGGREGATION
+      // O usa "cardinality": "ONE_TO_MANY" si no hay símbolos UML
+    }
+  ]
+}
+
+═══════════════════════════════════════════════════════════════
+📖 EJEMPLO COMPLETO - Herencias múltiples
+═══════════════════════════════════════════════════════════════
+
+Imagen muestra:
+  [Fisica] ──▷ [Persona]
+  [Juridica] ──▷ [Persona]
+
+JSON correcto:
 {
   "actions": [
     {
       "type": "CreateTable",
       "name": "persona",
-      "fields": [
-        { "name": "id", "type": "SERIAL", "isPrimary": true },
-        { "name": "nombre", "type": "VARCHAR(100)" }
-      ]
+      "fields": [{ "name": "email", "type": "VARCHAR(100)" }]
     },
     {
       "type": "CreateTable",
-      "name": "empleado",
-      "fields": [
-        { "name": "id", "type": "SERIAL", "isPrimary": true },
-        { "name": "salario", "type": "DECIMAL(10,2)" }
-      ]
+      "name": "fisica",
+      "fields": [{ "name": "dni", "type": "VARCHAR(20)" }]
+    },
+    {
+      "type": "CreateTable",
+      "name": "juridica",
+      "fields": [{ "name": "cif", "type": "VARCHAR(20)" }]
     },
     {
       "type": "CreateRelation",
-      "fromTable": "empleado",
+      "fromTable": "fisica",
+      "toTable": "persona",
+      "relationType": "INHERITANCE"
+    },
+    {
+      "type": "CreateRelation",
+      "fromTable": "juridica",
       "toTable": "persona",
       "relationType": "INHERITANCE"
     }
   ]
 }
 
-EJEMPLO 2 - Relación 1-N clásica:
-Imagen muestra: [Autor] ─1-N→ [Libro] con libro_autor_id visible
-{
-  "actions": [
-    {
-      "type": "CreateTable",
-      "name": "autor",
-      "fields": [
-        { "name": "id", "type": "SERIAL", "isPrimary": true },
-        { "name": "nombre", "type": "VARCHAR(100)" }
-      ]
-    },
-    {
-      "type": "CreateTable",
-      "name": "libro",
-      "fields": [
-        { "name": "id", "type": "SERIAL", "isPrimary": true },
-        { "name": "titulo", "type": "VARCHAR(200)" },
-        { "name": "autor_id", "type": "INT", "isForeign": true }
-      ]
-    },
-    {
-      "type": "CreateRelation",
-      "fromTable": "autor",
-      "toTable": "libro",
-      "cardinality": "ONE_TO_MANY"
-    }
-  ]
-}
+✅ RECORDATORIOS FINALES:
+- Triángulo = INHERITANCE (no uses cardinality)
+- Rombo lleno = COMPOSITION
+- Rombo vacío = AGGREGATION
+- Solo texto numérico sin símbolos = cardinality
+- Múltiples herencias están permitidas (varias tablas pueden heredar de una)
 
-═══════════════════════════════════════════════════════════════
-⚠️ RECORDATORIOS FINALES
-═══════════════════════════════════════════════════════════════
-
-✅ SÍ hacer:
-- Examinar cada línea/flecha con cuidado antes de clasificarla
-- Buscar símbolos UML primero (▷, ◆, ◇) antes de cardinalidades
-- Solo crear relaciones con líneas visibles claramente
-- Usar nombres exactos de las tablas como aparecen (normalizar a minúsculas)
-- Copiar solo los campos que aparecen en las cajas/rectángulos
-
-❌ NO hacer:
-- NO inventes campos FK si no están dibujados
-- NO agregues relaciones que no tienen línea visual
-- NO asumas "id" automático si no aparece en la tabla
-- NO confundas símbolos: ▷ ≠ ◆ ≠ ◇
-- NO uses "cardinality" para relaciones UML (INHERITANCE, COMPOSITION, etc.)
-
-🎯 RESPONDE ÚNICAMENTE CON JSON VÁLIDO EN ESTE FORMATO:
-{
-  "actions": [...]
-}`;
+🎯 RESPONDE ÚNICAMENTE CON JSON VÁLIDO.`;
 
 /**
  * Parsea una imagen de diagrama ER y devuelve acciones estructuradas
@@ -1121,15 +1344,18 @@ export async function parseImageIntent(
           content: [
             {
               type: "text",
-              text: `Analiza este diagrama entidad-relación y devuelve las acciones necesarias para recrearlo.
+              text: `Analiza este diagrama y devuelve el JSON siguiendo este ORDEN ESTRICTO:
 
-⚠️ IMPORTANTE - Busca estos símbolos UML en las líneas/flechas:
-1. Flechas con TRIÁNGULO VACÍO (▷, △) = HERENCIA → usa "relationType": "INHERITANCE"
-2. ROMBO LLENO/NEGRO (◆) = COMPOSICIÓN → usa "relationType": "COMPOSITION"
-3. ROMBO VACÍO (◇) = AGREGACIÓN → usa "relationType": "AGGREGATION"
-4. Solo usa "cardinality": "ONE_TO_MANY" si NO hay símbolos UML
+1. PRIMERO: Todas las CreateTable
+2. DESPUÉS: Todas las CreateRelation
 
-Examina CADA línea cuidadosamente antes de decidir el tipo de relación.`,
+RECUERDA:
+- Símbolos (▷, ◆, ◇) → usa "relationType"
+- Números (1, *, 1-N) sin símbolos → usa "cardinality"
+- NO agregues campos FK manualmente
+- Para N-M: solo crea tabla intermedia si tiene campos adicionales
+
+Examina cada línea cuidadosamente.`,
             },
             {
               type: "image_url",

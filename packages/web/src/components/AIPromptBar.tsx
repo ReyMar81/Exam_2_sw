@@ -235,12 +235,14 @@ export function AIPromptBar({
       return;
     }
 
-    // Validar tamaño (máximo 10MB antes de comprimir)
-    if (file.size > 10 * 1024 * 1024) {
-      setError("La imagen es muy grande. Tamaño máximo: 10MB");
+    // Validar tamaño (máximo 20MB antes de comprimir)
+    if (file.size > 20 * 1024 * 1024) {
+      setError("La imagen es muy grande. Tamaño máximo: 20MB");
       setTimeout(() => setError(null), 3000);
       return;
     }
+
+    console.log(`📷 [Image] File size: ${(file.size / 1024 / 1024).toFixed(2)}MB, type: ${file.type}`);
 
     setLoading(true);
     setError(null);
@@ -249,7 +251,18 @@ export function AIPromptBar({
       console.log("📷 [Image] Processing image:", file.name);
 
       // Redimensionar y comprimir imagen
-      const imageBase64 = await resizeAndCompressImage(file, 1200, 0.8);
+      // Para diagramas simples: tamaño 1600px con calidad 0.7
+      const imageBase64 = await resizeAndCompressImage(file, 1600, 0.7);
+
+      // Validar tamaño después de comprimir
+      const compressedSizeMB = (imageBase64.length * 0.75) / (1024 * 1024);
+      console.log(`📷 [Image] Compressed size: ${compressedSizeMB.toFixed(2)}MB`);
+
+      if (compressedSizeMB > 10) {
+        setError(`Imagen muy grande después de comprimir (${compressedSizeMB.toFixed(1)}MB). Intenta con una imagen más pequeña o simple.`);
+        setTimeout(() => setError(null), 5000);
+        return;
+      }
 
       console.log("🧠 [AIPromptBar] Sending image to AI...");
 
@@ -285,11 +298,19 @@ export function AIPromptBar({
       }
     } catch (err: any) {
       console.error("❌ [AIPromptBar] Image processing error:", err);
+      console.error("❌ [AIPromptBar] Full error object:", JSON.stringify(err, null, 2));
 
-      const errorMessage =
-        err.response?.data?.error ||
-        err.response?.data?.details ||
-        "Error al analizar la imagen. Intenta con otra imagen.";
+      let errorMessage = "Error al analizar la imagen. Intenta con otra imagen.";
+
+      if (err.response) {
+        // Error del servidor
+        errorMessage = err.response?.data?.error || err.response?.data?.details || errorMessage;
+        console.error(`❌ [AIPromptBar] Server error (${err.response.status}):`, err.response.data);
+      } else if (err.message) {
+        // Error local (compresión, etc.)
+        errorMessage = `Error procesando imagen: ${err.message}`;
+        console.error("❌ [AIPromptBar] Local error:", err.message);
+      }
 
       setError(errorMessage);
 
