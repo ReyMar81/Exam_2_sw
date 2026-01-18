@@ -59,6 +59,7 @@ export interface TableData {
   name: string;
   label?: string;
   fields: Field[];
+  isJunctionTable?: boolean; // 🆕 Indica si es tabla intermedia de relación N-N
 }
 
 // ========================

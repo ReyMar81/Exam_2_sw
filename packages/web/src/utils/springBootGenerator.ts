@@ -89,6 +89,12 @@ export async function generateSpringBootProject(
       `${baseDir}/${packagePath}/entity/${table.className}.java`,
       generateEntity(table, packageName, tablesMetadata)
     );
+    
+    // DTOs para entidades con relaciones
+    zip.file(
+      `${baseDir}/${packagePath}/dto/${table.className}DTO.java`,
+      generateDTO(table, packageName, tablesMetadata)
+    );
 
     // Generar CRUD para todas las entidades con id
     zip.file(
@@ -98,19 +104,19 @@ export async function generateSpringBootProject(
 
     zip.file(
       `${baseDir}/${packagePath}/service/${table.className}Service.java`,
-      generateService(table, packageName)
+      generateService(table, packageName, tablesMetadata)
     );
 
     zip.file(
       `${baseDir}/${packagePath}/controller/${table.className}Controller.java`,
-      generateController(table, packageName)
+      generateController(table, packageName, tablesMetadata)
     );
   });
 
-  // README con instrucciones
+  // README con instrucciones y ejemplos JSON
   zip.file(
     `${baseDir}/README.md`,
-    generateReadme(sanitizedProjectName, port)
+    generateReadme(sanitizedProjectName, port, tablesMetadata)
   );
 
   return await zip.generateAsync({ type: "uint8array" });
@@ -391,6 +397,83 @@ public class ${className} {
 }
 
 /**
+ * Genera DTO para evitar referencias circulares y simplificar JSON
+ */
+function generateDTO(
+  table: TableMetadata,
+  packageName: string,
+  allTables: TableMetadata[]
+): string {
+  const imports = new Set<string>(['lombok.Data', 'lombok.NoArgsConstructor', 'lombok.AllArgsConstructor']);
+  
+  // Detectar imports necesarios por tipos de campos
+  const typeImports = getRequiredImports(table.fields);
+  typeImports.forEach(imp => imports.add(imp));
+  
+  let fieldsCode = '';
+  
+  table.fields.forEach(field => {
+    const javaField = toCamelCase(field.name);
+    const javaType = mapSqlToJavaType(field.type);
+    
+    // Primary Key
+    if (field.isPrimary) {
+      fieldsCode += `    private ${javaType} ${javaField};\n\n`;
+      return;
+    }
+    
+    // Foreign Key → Solo ID (no objeto completo)
+    if (field.isForeign && field.references) {
+      const refTableName = field.references.toLowerCase().replace(/\s+/g, '_');
+      const refTable = allTables.find(t => t.tableName === refTableName);
+      
+      if (refTable && !refTable.isPureJoinTable) {
+        const relationType = field.relationType || "1-N";
+        const refPK = refTable.primaryKey;
+        const refPKType = refPK ? mapSqlToJavaType(refPK.type) : 'Integer';
+        
+        // HERENCIA: No incluir FK en DTO (se hereda el ID)
+        if (relationType === 'INHERITANCE') {
+          return;
+        }
+        
+        // Otras relaciones: campo con sufijo "Id"
+        fieldsCode += `    private ${refPKType} ${toCamelCase(refTable.tableName)}Id;\n\n`;
+        return;
+      }
+    }
+    
+    // Columna normal
+    if (!field.isForeign) {
+      fieldsCode += `    private ${javaType} ${javaField};\n\n`;
+    }
+  });
+  
+  const importsCode = Array.from(imports)
+    .sort((a, b) => {
+      const getOrder = (imp: string) => {
+        if (imp.startsWith('java.')) return 0;
+        if (imp.startsWith('lombok.')) return 1;
+        return 2;
+      };
+      return getOrder(a) - getOrder(b) || a.localeCompare(b);
+    })
+    .map(imp => `import ${imp};`)
+    .join('\n');
+  
+  return `package ${packageName}.dto;
+
+${importsCode}
+
+@Data
+@NoArgsConstructor
+@AllArgsConstructor
+public class ${table.className}DTO {
+${fieldsCode}}
+`;
+}
+
+/**
  * Genera entidad JPA con relaciones
  */
 function generateEntity(
@@ -468,16 +551,29 @@ function generateEntity(
       if (refTable && !refTable.isPureJoinTable) {
         // 🎯 UML 2.5: Determinar tipo de relación y CASCADE
         const relationType = field.relationType || "1-N";
+        
+        // 🎯 HERENCIA: El PK del hijo ES el FK al padre (@MapsId + @OneToOne)
+        if (relationType === 'INHERITANCE' && field.isPrimary) {
+          fieldsCode += `    @MapsId\n`;
+          fieldsCode += `    @OneToOne(fetch = FetchType.EAGER, cascade = {CascadeType.PERSIST, CascadeType.MERGE}, optional = false)\n`;
+          fieldsCode += `    @JoinColumn(name = "${field.name}", nullable = false)\n`;
+          fieldsCode += `    private ${refTable.className} ${toCamelCase(refTable.tableName)};\n\n`;
+          return;
+        }
+        
+        // 🎯 Otras relaciones (COMPOSITION, AGGREGATION, ASSOCIATION)
         let cascadeType = '';
-        let fetchType = 'FetchType.EAGER';
+        let fetchType = 'FetchType.LAZY'; // DEFAULT: LAZY para mejor performance
         let optional = 'optional = true';
+        let jsonIgnore = '';
         
         switch (relationType) {
           case 'COMPOSITION':
-            // ◆ Composición: CASCADE ALL (orphanRemoval solo aplica en @OneToMany)
-            cascadeType = ', cascade = CascadeType.ALL';
+            // ◆ Composición: Sin CASCADE en @ManyToOne (se maneja desde @OneToMany inverso)
+            cascadeType = '';
             optional = 'optional = false';
-            fetchType = 'FetchType.EAGER';
+            fetchType = 'FetchType.LAZY';
+            jsonIgnore = '    @com.fasterxml.jackson.annotation.JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})\n';
             break;
             
           case 'AGGREGATION':
@@ -485,22 +581,18 @@ function generateEntity(
             cascadeType = '';
             optional = 'optional = true';
             fetchType = 'FetchType.LAZY';
-            break;
-            
-          case 'INHERITANCE':
-            // △ Herencia: CASCADE PERSIST + MERGE
-            cascadeType = ', cascade = {CascadeType.PERSIST, CascadeType.MERGE}';
-            optional = 'optional = false';
-            fetchType = 'FetchType.EAGER';
+            jsonIgnore = '    @com.fasterxml.jackson.annotation.JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})\n';
             break;
             
           default:
-            // ASSOCIATION, 1-1, 1-N: Comportamiento estándar
-            cascadeType = field.nullable ? '' : ', cascade = CascadeType.PERSIST';
+            // ASSOCIATION, 1-1, 1-N: Sin CASCADE en @ManyToOne
+            cascadeType = '';
             optional = field.nullable ? 'optional = true' : 'optional = false';
             fetchType = 'FetchType.LAZY';
+            jsonIgnore = '    @com.fasterxml.jackson.annotation.JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})\n';
         }
         
+        fieldsCode += jsonIgnore;
         fieldsCode += `    @ManyToOne(fetch = ${fetchType}${cascadeType}, ${optional})\n`;
         fieldsCode += `    @JoinColumn(name = "${field.name}"`;
         
@@ -573,17 +665,119 @@ public interface ${table.className}Repository extends JpaRepository<${table.clas
 }
 
 /**
- * Genera servicio con lógica CRUD
+ * Genera servicio con lógica CRUD y soporte para DTOs
  */
-function generateService(table: TableMetadata, packageName: string): string {
+function generateService(table: TableMetadata, packageName: string, allTables: TableMetadata[]): string {
   const idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Integer';
   const entityVar = toCamelCase(table.className);
+  const idFieldName = table.primaryKey?.name || 'id';
+  
+  // Detectar relaciones FK para construir saveFromDTO
+  const fkRelations = table.fields.filter(f => f.isForeign && f.references);
+  
+  let repositoryAutowires = '';
+  let repositoryImports = '';
+  let entityImports = '';
+  let dtoConversionCode = '';
+  
+  // Generar autowired e imports para repositorios relacionados
+  fkRelations.forEach(fk => {
+    const refTableName = fk.references!.toLowerCase().replace(/\s+/g, '_');
+    const refTable = allTables.find(t => t.tableName === refTableName);
+    if (refTable && !refTable.isPureJoinTable && fk.relationType !== 'INHERITANCE') {
+      repositoryAutowires += `    @Autowired\n    private ${refTable.className}Repository ${toCamelCase(refTable.tableName)}Repository;\n    \n`;
+      repositoryImports += `import ${packageName}.repository.${refTable.className}Repository;\n`;
+      entityImports += `import ${packageName}.entity.${refTable.className};\n`;
+    }
+  });
+  
+  // Generar código de conversión DTO → Entity
+  if (fkRelations.length > 0) {
+    dtoConversionCode = `\n    public ${table.className} saveFromDTO(${table.className}DTO dto) {\n`;
+    dtoConversionCode += `        ${table.className} ${entityVar} = new ${table.className}();\n`;
+    
+    table.fields.forEach(field => {
+      const javaField = toCamelCase(field.name);
+      
+      if (field.isPrimary) {
+        return; // Skip PK (auto-generado)
+      }
+      
+      if (field.isForeign && field.references) {
+        const refTableName = field.references.toLowerCase().replace(/\s+/g, '_');
+        const refTable = allTables.find(t => t.tableName === refTableName);
+        
+        if (refTable && !refTable.isPureJoinTable && field.relationType !== 'INHERITANCE') {
+          const refEntityVar = toCamelCase(refTable.tableName);
+          const isOptional = field.nullable || field.relationType === 'AGGREGATION';
+          
+          if (isOptional) {
+            dtoConversionCode += `        if (dto.get${capitalize(refEntityVar)}Id() != null) {\n`;
+            dtoConversionCode += `            ${refTable.className} ${refEntityVar} = ${refEntityVar}Repository.findById(dto.get${capitalize(refEntityVar)}Id())\n`;
+            dtoConversionCode += `                .orElseThrow(() -> new RuntimeException("${refTable.className} not found"));\n`;
+            dtoConversionCode += `            ${entityVar}.set${capitalize(refEntityVar)}(${refEntityVar});\n`;
+            dtoConversionCode += `        }\n`;
+          } else {
+            dtoConversionCode += `        ${refTable.className} ${refEntityVar} = ${refEntityVar}Repository.findById(dto.get${capitalize(refEntityVar)}Id())\n`;
+            dtoConversionCode += `            .orElseThrow(() -> new RuntimeException("${refTable.className} not found"));\n`;
+            dtoConversionCode += `        ${entityVar}.set${capitalize(refEntityVar)}(${refEntityVar});\n`;
+          }
+        }
+      } else if (!field.isForeign) {
+        dtoConversionCode += `        ${entityVar}.set${capitalize(javaField)}(dto.get${capitalize(javaField)}());\n`;
+      }
+    });
+    
+    dtoConversionCode += `        return repository.save(${entityVar});\n`;
+    dtoConversionCode += `    }\n`;
+    
+    // Método updateFromDTO
+    dtoConversionCode += `\n    public ${table.className} updateFromDTO(${idType} id, ${table.className}DTO dto) {\n`;
+    dtoConversionCode += `        ${table.className} ${entityVar} = repository.findById(id)\n`;
+    dtoConversionCode += `            .orElseThrow(() -> new RuntimeException("${table.className} con id " + id + " no encontrado"));\n`;
+    
+    table.fields.forEach(field => {
+      const javaField = toCamelCase(field.name);
+      
+      if (field.isPrimary) {
+        return;
+      }
+      
+      if (field.isForeign && field.references) {
+        const refTableName = field.references.toLowerCase().replace(/\s+/g, '_');
+        const refTable = allTables.find(t => t.tableName === refTableName);
+        
+        if (refTable && !refTable.isPureJoinTable && field.relationType !== 'INHERITANCE') {
+          const refEntityVar = toCamelCase(refTable.tableName);
+          const isOptional = field.nullable || field.relationType === 'AGGREGATION';
+          
+          if (isOptional) {
+            dtoConversionCode += `        if (dto.get${capitalize(refEntityVar)}Id() != null) {\n`;
+            dtoConversionCode += `            ${refTable.className} ${refEntityVar} = ${refEntityVar}Repository.findById(dto.get${capitalize(refEntityVar)}Id())\n`;
+            dtoConversionCode += `                .orElseThrow(() -> new RuntimeException("${refTable.className} not found"));\n`;
+            dtoConversionCode += `            ${entityVar}.set${capitalize(refEntityVar)}(${refEntityVar});\n`;
+            dtoConversionCode += `        }\n`;
+          } else {
+            dtoConversionCode += `        ${refTable.className} ${refEntityVar} = ${refEntityVar}Repository.findById(dto.get${capitalize(refEntityVar)}Id())\n`;
+            dtoConversionCode += `            .orElseThrow(() -> new RuntimeException("${refTable.className} not found"));\n`;
+            dtoConversionCode += `        ${entityVar}.set${capitalize(refEntityVar)}(${refEntityVar});\n`;
+          }
+        }
+      } else if (!field.isForeign) {
+        dtoConversionCode += `        ${entityVar}.set${capitalize(javaField)}(dto.get${capitalize(javaField)}());\n`;
+      }
+    });
+    
+    dtoConversionCode += `        return repository.save(${entityVar});\n`;
+    dtoConversionCode += `    }\n`;
+  }
   
   return `package ${packageName}.service;
 
 import ${packageName}.entity.${table.className};
+import ${packageName}.dto.${table.className}DTO;
 import ${packageName}.repository.${table.className}Repository;
-import org.springframework.beans.factory.annotation.Autowired;
+${entityImports}${repositoryImports}import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import java.util.List;
 import java.util.Optional;
@@ -593,7 +787,7 @@ public class ${table.className}Service {
     
     @Autowired
     private ${table.className}Repository repository;
-    
+    ${repositoryAutowires}
     public List<${table.className}> findAll() {
         return repository.findAll();
     }
@@ -605,12 +799,12 @@ public class ${table.className}Service {
     public ${table.className} save(${table.className} ${entityVar}) {
         return repository.save(${entityVar});
     }
-    
+    ${dtoConversionCode}
     public ${table.className} update(${idType} id, ${table.className} ${entityVar}) {
         if (!repository.existsById(id)) {
             throw new RuntimeException("${table.className} con id " + id + " no encontrado");
         }
-        ${entityVar}.set${toPascalCase(table.primaryKey?.name || 'id')}(id);
+        ${entityVar}.set${capitalize(toCamelCase(idFieldName))}(id);
         return repository.save(${entityVar});
     }
     
@@ -622,17 +816,58 @@ public class ${table.className}Service {
 }
 
 /**
- * Genera controlador REST
+ * Genera controlador REST con soporte para DTOs
  */
-function generateController(table: TableMetadata, packageName: string): string {
+function generateController(table: TableMetadata, packageName: string, allTables: TableMetadata[]): string {
   const idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Integer';
   const entityVar = toCamelCase(table.className);
-  const pluralName = table.tableName; // Usar nombre de tabla como plural
+  const pluralName = table.tableName; // Usar nombre de tabla como plural en minúsculas
+  
+  // Detectar si tiene relaciones FK para usar DTO
+  const hasFKRelations = table.fields.some(f => f.isForeign && f.references && f.relationType !== 'INHERITANCE');
+  
+  const dtoMethods = hasFKRelations ? `
+    @PostMapping
+    public ${table.className} create(@RequestBody ${table.className}DTO dto) {
+        return service.saveFromDTO(dto);
+    }
+    
+    @PutMapping("/{id}")
+    public ResponseEntity<${table.className}> update(
+        @PathVariable ${idType} id,
+        @RequestBody ${table.className}DTO dto
+    ) {
+        try {
+            return ResponseEntity.ok(service.updateFromDTO(id, dto));
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+` : `
+    @PostMapping
+    public ${table.className} create(@RequestBody ${table.className} ${entityVar}) {
+        return service.save(${entityVar});
+    }
+    
+    @PutMapping("/{id}")
+    public ResponseEntity<${table.className}> update(
+        @PathVariable ${idType} id,
+        @RequestBody ${table.className} ${entityVar}
+    ) {
+        try {
+            return ResponseEntity.ok(service.update(id, ${entityVar}));
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
+`;
+
+  const dtoImport = hasFKRelations ? `import ${packageName}.dto.${table.className}DTO;\n` : '';
   
   return `package ${packageName}.controller;
 
 import ${packageName}.entity.${table.className};
-import ${packageName}.service.${table.className}Service;
+${dtoImport}import ${packageName}.service.${table.className}Service;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -657,24 +892,7 @@ public class ${table.className}Controller {
             .map(ResponseEntity::ok)
             .orElse(ResponseEntity.notFound().build());
     }
-    
-    @PostMapping
-    public ${table.className} create(@RequestBody ${table.className} ${entityVar}) {
-        return service.save(${entityVar});
-    }
-    
-    @PutMapping("/{id}")
-    public ResponseEntity<${table.className}> update(
-        @PathVariable ${idType} id,
-        @RequestBody ${table.className} ${entityVar}
-    ) {
-        try {
-            return ResponseEntity.ok(service.update(id, ${entityVar}));
-        } catch (RuntimeException e) {
-            return ResponseEntity.notFound().build();
-        }
-    }
-    
+    ${dtoMethods}
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable ${idType} id) {
         service.delete(id);
@@ -685,9 +903,95 @@ public class ${table.className}Controller {
 }
 
 /**
+ * Genera ejemplos JSON para cada entidad usando DTOs
+ */
+function generateJsonExamples(tablesMetadata: TableMetadata[]): string {
+  let examples = '';
+  
+  tablesMetadata.forEach(table => {
+    if (table.isPureJoinTable) return; // Skip join tables puras
+    
+    const hasFKRelations = table.fields.some(f => f.isForeign && f.references && f.relationType !== 'INHERITANCE');
+    
+    examples += `### ${table.tableName} (${table.className})\n\n`;
+    examples += `**Endpoint:** \`http://localhost:{PORT}/${table.tableName}\`\n\n`;
+    
+    if (hasFKRelations) {
+      examples += `**POST/PUT JSON (usando DTO con IDs):**\n\n`;
+    } else {
+      examples += `**POST/PUT JSON:**\n\n`;
+    }
+    
+    examples += '```json\n';
+    examples += '{\n';
+    
+    const exampleFields: string[] = [];
+    
+    table.fields.forEach(field => {
+      // Skip PK (auto-generado) y FKs de herencia (@MapsId)
+      if (field.isPrimary) return;
+      if (field.isForeign && field.relationType === 'INHERITANCE') return;
+      
+      const javaField = toCamelCase(field.name);
+      const javaType = mapSqlToJavaType(field.type);
+      
+      // Generar valor de ejemplo según tipo
+      let exampleValue: string;
+      
+      if (field.isForeign && field.references) {
+        // FK: Solo el ID (DTO pattern)
+        const refTable = field.references.toString().toLowerCase().replace(/\s+/g, '_');
+        const refClassName = toPascalCase(refTable);
+        exampleValue = `1 // ID de ${refClassName} (${refTable})`;
+        const fieldName = `${toCamelCase(refTable)}Id`;
+        exampleFields.push(`  "${fieldName}": ${exampleValue}`);
+        return;
+      }
+      
+      switch (javaType) {
+        case 'Integer':
+        case 'Long':
+        case 'Short':
+          exampleValue = '123';
+          break;
+        case 'Double':
+        case 'Float':
+          exampleValue = '123.45';
+          break;
+        case 'BigDecimal':
+          exampleValue = '"999.99"';
+          break;
+        case 'Boolean':
+          exampleValue = 'true';
+          break;
+        case 'LocalDate':
+          exampleValue = '"2026-01-18"';
+          break;
+        case 'LocalDateTime':
+          exampleValue = '"2026-01-18T12:00:00"';
+          break;
+        case 'LocalTime':
+          exampleValue = '"12:00:00"';
+          break;
+        default:
+          exampleValue = `"texto_ejemplo"`;
+      }
+      
+      exampleFields.push(`  "${javaField}": ${exampleValue}`);
+    });
+    
+    examples += exampleFields.join(',\n');
+    examples += '\n}\n';
+    examples += '```\n\n';
+  });
+  
+  return examples;
+}
+
+/**
  * Genera README con instrucciones de ejecución
  */
-function generateReadme(projectName: string, port: number): string {
+function generateReadme(projectName: string, port: number, tablesMetadata: TableMetadata[]): string {
   return `# ${projectName} Backend
 
 Backend Spring Boot generado automáticamente desde diagrama ER por **Exam_2_sw**.
@@ -697,7 +1001,7 @@ Backend Spring Boot generado automáticamente desde diagrama ER por **Exam_2_sw*
 ### Opción 1: Docker Compose (más simple)
 
 \`\`\`bash
-docker compose up --build
+docker-compose up --build
 \`\`\`
 
 El servidor arrancará automáticamente. Verás en los logs:
@@ -845,6 +1149,10 @@ src/main/java/com/${projectName}/
 3. Usa \`Content-Type: application/json\` en los headers
 4. Los datos persisten solo durante la ejecución (H2 en memoria)
 
+### 📝 Ejemplos JSON por Entidad
+
+${generateJsonExamples(tablesMetadata)}
+
 ---
 
 ## ⚙️ Configuración
@@ -970,6 +1278,13 @@ function toPascalCase(str: string): string {
 function toCamelCase(str: string): string {
   const pascal = toPascalCase(str);
   return pascal.charAt(0).toLowerCase() + pascal.slice(1);
+}
+
+/**
+ * Capitaliza la primera letra de un string (para getters/setters)
+ */
+function capitalize(str: string): string {
+  return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
 /**

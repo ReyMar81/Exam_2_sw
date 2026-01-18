@@ -21,19 +21,20 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
   const generateTableSQL = (node: Node): { 
     tableName: string; 
     sql: string; 
-    foreignKeys: Array<{
-      field: string;
-      references: string;
-      referencesField?: string;
-      onDelete?: string;
-      onUpdate?: string;
-      relationType?: string;
-    }>;
+    foreignKeys: Array<string>;
     hasFK: boolean;
   } => {
     const data = node.data as TableData;
     const tableName = (data.name || data.label || "tabla_sin_nombre").toLowerCase().replace(/\s+/g, '_');
     const fields = data.fields || [];
+
+    // 🔍 Buscar relaciones de HERENCIA donde esta tabla es la hija (source)
+    const inheritanceEdges = edges.filter(edge => {
+      const sourceNode = tableNodes.find(n => n.id === edge.source);
+      const sourceTableName = (sourceNode?.data.name || sourceNode?.data.label || "").toLowerCase().replace(/\s+/g, '_');
+      return sourceTableName === tableName && 
+             edge.data?.relationType === "INHERITANCE";
+    });
 
     let tableSql = `CREATE TABLE ${tableName} (\n`;
     
@@ -47,14 +48,27 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
       onUpdate?: string;
       relationType?: string;
     }> = [];
+
+    // 🆕 Detectar HERENCIA: el PK del hijo ES el FK al padre (mismo campo)
+    const hasInheritance = inheritanceEdges.length > 0;
     const referencedTables: string[] = [];
 
     // Detectar si es join table pura (solo 2 FKs, sin columnas adicionales)
     const foreignKeyFields = fields.filter(f => f.isForeign);
     const nonFkNonPkFields = fields.filter(f => !f.isForeign && !f.isPrimary);
     const isPureJoinTable = foreignKeyFields.length === 2 && nonFkNonPkFields.length === 0;
+    
+    // UML 2.5: Relaciones puramente conceptuales que NO generan FK física
+    // NOTA: INHERITANCE sí genera FK (tabla hija referencia tabla padre)
+    const conceptualRelations = ["DEPENDENCY", "REALIZATION"];
 
     fields.forEach((field) => {
+      // UML 2.5: Ignorar FKs de relaciones puramente conceptuales
+      // INHERITANCE sí crea FK física (tabla hija → tabla padre)
+      if (field.isForeign && field.relationType && conceptualRelations.includes(field.relationType)) {
+        return; // DEPENDENCY, REALIZATION no generan columnas en BD
+      }
+      
       const columnName = field.name.toLowerCase().replace(/\s+/g, '_');
       const columnType = field.type || "VARCHAR(255)";
       
@@ -67,11 +81,44 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
       columns.push(columnDef);
 
       // Si es join pura, NO agregar id como PK (usaremos PK compuesta)
-      if (field.isPrimary && !isPureJoinTable) {
+      if (field.isPrimary) {
         primaryKeys.push(columnName);
+        
+        // 🆕 HERENCIA: Si hay herencia y este campo es PK, verificar si debe ser FK al padre
+        if (hasInheritance) {
+          inheritanceEdges.forEach(edge => {
+            const targetNode = tableNodes.find(n => n.id === edge.target);
+            const parentTableName = (targetNode?.data.name || targetNode?.data.label || "").toLowerCase().replace(/\s+/g, '_');
+            const parentPK = targetNode?.data.fields?.find((f: Field) => f.isPrimary);
+            const parentPKName = (parentPK?.name || 'id').toLowerCase();
+            
+            // El PK del hijo ES el FK al padre (mismo campo)
+            if (columnName === parentPKName) {
+              foreignKeys.push({
+                field: columnName,
+                references: parentTableName,
+                referencesField: parentPKName,
+                onDelete: edge.data?.onDelete || "CASCADE",
+                onUpdate: edge.data?.onUpdate || "CASCADE",
+                relationType: "INHERITANCE"
+              });
+              referencedTables.push(parentTableName);
+            }
+          });
+        }
+        
+        if (!isPureJoinTable) {
+          // Ya se agregó a primaryKeys arriba
+        }
       }
 
       if (field.isForeign && field.references) {
+        // UML 2.5: INHERITANCE sí genera FK física en BD
+        // Solo DEPENDENCY y REALIZATION son puramente conceptuales
+        if (field.relationType && conceptualRelations.includes(field.relationType)) {
+          return; // DEPENDENCY, REALIZATION no generan FK en BD
+        }
+        
         const refTable = field.references.toLowerCase().replace(/\s+/g, '_');
         const refField = field.referencesField || 'id';
         foreignKeys.push({
@@ -102,10 +149,21 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
       const onUpdate = fk.onUpdate || "CASCADE";
       const refField = fk.referencesField || 'id';
       
-      // Comentario UML si existe
-      const comment = fk.relationType && !["1-1", "1-N", "N-N", "FK"].includes(fk.relationType)
-        ? ` -- ${fk.relationType}`
-        : '';
+      // Comentario con tipo de relación UML 2.5 y sus características
+      let comment = '';
+      if (fk.relationType) {
+        const relationLabels: Record<string, string> = {
+          "INHERITANCE": "Inheritance (△) - Subclass → Superclass",
+          "ASSOCIATION": "Association",
+          "AGGREGATION": "Aggregation (◇)",
+          "COMPOSITION": "Composition (◆)",
+          "1-1": "One-to-One",
+          "1-N": "One-to-Many",
+          "N-N": "Many-to-Many"
+        };
+        const label = relationLabels[fk.relationType] || fk.relationType;
+        comment = ` -- ${label}`;
+      }
       
       tableSql += `,\n  FOREIGN KEY (${fk.field}) REFERENCES ${fk.references}(${refField}) ON DELETE ${onDelete} ON UPDATE ${onUpdate}${comment}`;
     });
@@ -115,8 +173,8 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
     return {
       tableName,
       sql: tableSql,
-      foreignKeys: foreignKeys.map(fk => fk.references), // Solo los nombres de las tablas referenciadas
-      hasFK: referencedTables.length > 0
+      foreignKeys: foreignKeys.map(fk => fk.references),
+      hasFK: foreignKeys.length > 0 
     };
   };
 
@@ -201,47 +259,8 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
     }
   }
 
-  // === PASO 2: Relaciones basadas en edges (opcional, para relaciones adicionales) ===
-  if (edges.length > 0) {
-    const processedEdges = new Set<string>();
-
-    edges.forEach((edge, index) => {
-      const sourceNode = tableNodes.find(n => n.id === edge.source);
-      const targetNode = tableNodes.find(n => n.id === edge.target);
-
-      if (!sourceNode || !targetNode) return;
-
-      const sourceTable = ((sourceNode.data as TableData).name || 
-                          (sourceNode.data as TableData).label || 
-                          "tabla_origen").toLowerCase().replace(/\s+/g, '_');
-      const targetTable = ((targetNode.data as TableData).name || 
-                          (targetNode.data as TableData).label || 
-                          "tabla_destino").toLowerCase().replace(/\s+/g, '_');
-      
-      // Detectar tipo de relación desde el label del edge
-      const relationType = (edge.label as string || "1-N").toUpperCase();
-      
-      // Evitar duplicados
-      const edgeKey = `${sourceTable}-${targetTable}-${relationType}`;
-      if (processedEdges.has(edgeKey)) return;
-      processedEdges.add(edgeKey);
-
-      if (relationType.includes("N-N") || relationType.includes("N:N") || relationType.includes("MANY-TO-MANY")) {
-        const junctionTable = `${sourceTable}_${targetTable}`;
-        sql += `\n-- N-N: ${sourceTable} ↔ ${targetTable}\n`;
-        sql += `CREATE TABLE IF NOT EXISTS ${junctionTable} (\n`;
-        sql += `  ${sourceTable}_id INT NOT NULL,\n`;
-        sql += `  ${targetTable}_id INT NOT NULL,\n`;
-        sql += `  PRIMARY KEY (${sourceTable}_id, ${targetTable}_id),\n`;
-        sql += `  FOREIGN KEY (${sourceTable}_id) REFERENCES ${sourceTable}(id) ON DELETE CASCADE,\n`;
-        sql += `  FOREIGN KEY (${targetTable}_id) REFERENCES ${targetTable}(id) ON DELETE CASCADE\n`;
-        sql += `);\n\n`;
-        
-        sql += `CREATE INDEX idx_${junctionTable}_${sourceTable} ON ${junctionTable}(${sourceTable}_id);\n`;
-        sql += `CREATE INDEX idx_${junctionTable}_${targetTable} ON ${junctionTable}(${targetTable}_id);\n`;
-      }
-    });
-  }
+  // === COMENTARIOS FINALES ===
+  sql += "\n-- ✅ Script generado según UML 2.5\n";
 
   return sql;
 }

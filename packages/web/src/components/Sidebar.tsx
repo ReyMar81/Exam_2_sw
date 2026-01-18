@@ -1,6 +1,7 @@
 import React from "react";
 import { Node, Edge } from "reactflow";
 import type { Field } from "@shared/types";
+import { useViewMode } from "../store/ViewModeContext";
 
 interface SidebarProps {
   nodes: Node[];
@@ -25,6 +26,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const tableNodes = nodes.filter(n => n.type === 'table');
   const selectedNodeData = tableNodes.find(n => n.id === selectedNode);
+  const { viewMode, toggleViewMode } = useViewMode();
   
   return (
     <div style={{
@@ -48,13 +50,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
         background: "#222"
       }}>
         <h3 style={{ 
-          margin: 0, 
+          margin: "0 0 12px 0", 
           fontSize: "16px", 
           fontWeight: "600",
           letterSpacing: "0.3px"
         }}>
-          �️ Diagrama ER
+          🏗️ Diagrama ER - UML 2.5
         </h3>
+        
+        {/* Botón Toggle Vista */}
+        <button
+          onClick={toggleViewMode}
+          title={viewMode === "SQL" ? "Cambiar a vista UML 2.5 (oculta FKs y muestra tipos abstractos)" : "Cambiar a vista SQL (muestra FKs y tipos de BD)"}
+          style={{
+            width: "100%",
+            background: viewMode === "UML" ? "linear-gradient(135deg, #2ecc71 0%, #27ae60 100%)" : "linear-gradient(135deg, #3498db 0%, #2980b9 100%)",
+            color: "#fff",
+            border: "none",
+            padding: "8px 12px",
+            borderRadius: 6,
+            cursor: "pointer",
+            fontWeight: "600",
+            fontSize: "12px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 6,
+            transition: "all 0.2s ease"
+          }}
+        >
+          <span style={{ fontSize: "14px" }}>{viewMode === "UML" ? "📐" : "🗄️"}</span>
+          Vista: {viewMode === "UML" ? "UML 2.5" : "SQL"}
+        </button>
       </div>
 
       {/* Stats */}
@@ -313,7 +340,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         opacity: 0.5,
         textAlign: "center"
       }}>
-        Diagrama ER Colaborativo
+        Diagrama ER - UML 2.5 Colaborativo
       </div>
     </div>
   );

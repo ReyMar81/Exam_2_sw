@@ -27,10 +27,14 @@ RUN apk add --no-cache openssl
 COPY --from=serverbuild /app/packages/server/dist ./packages/server/dist
 COPY --from=serverbuild /app/packages/server/package.json ./packages/server/
 COPY --from=serverbuild /app/packages/server/prisma ./packages/server/prisma
+COPY --from=serverbuild /app/packages/server/start.sh ./packages/server/start.sh
 COPY --from=webbuild /app/packages/web/dist ./packages/web/dist
+
+# Dar permisos de ejecución al script
+RUN chmod +x ./packages/server/start.sh
 
 # Instalar dependencias de producción y generar cliente Prisma
 RUN cd packages/server && npm install --omit=dev && npx prisma generate
 
 EXPOSE 3001
-CMD ["node","packages/server/dist/index.js"]
+CMD ["/app/packages/server/start.sh"]

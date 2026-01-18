@@ -21,23 +21,17 @@ export function implementInheritance(
 ): Field[] {
   const inheritedFields: Field[] = [];
   
-  // 🎯 Estrategia Table-Per-Type (UML 2.5):
-  // La subclase SOLO tiene FK al padre + campos propios
-  // Los campos comunes NO se duplican (están en la superclase)
-  
   const pkField = parentTable.data.fields.find(f => f.isPrimary);
   if (!pkField) {
     console.warn(`⚠️ [Inheritance] Parent table ${parentTable.data.name} has no PK`);
     return inheritedFields;
   }
   
-  // Verificar si ya existe FK al padre
   const existingFK = childTable.data.fields.find(
     (f) => f.isForeign && f.references === parentTable.data.name
   );
   
   if (!existingFK) {
-    // Crear SOLO FK al padre (no copiar campos)
     const fkField: Field = {
       id: Date.now() + Math.random(),
       name: `${parentTable.data.name.toLowerCase()}_${pkField.name}`,
@@ -75,18 +69,14 @@ export function determinePKFK(
   const pkSource = sourceTable.data.fields.find((f) => f.isPrimary);
   const pkTarget = targetTable.data.fields.find((f) => f.isPrimary);
 
-  // Si el source tiene PK y target no, target será FK
   if (pkSource && !pkTarget) {
     return { pkTable: sourceTable, fkTable: targetTable };
   }
 
-  // Si el target tiene PK y source no, source será FK
   if (!pkSource && pkTarget) {
     return { pkTable: targetTable, fkTable: sourceTable };
   }
 
-  // Si ambos tienen PK, asume que el source es PK por defecto (1-N)
-  // El source (tabla referenciada) es el lado "1", el target es el lado "N"
   return { pkTable: sourceTable, fkTable: targetTable };
 }
 
@@ -105,58 +95,48 @@ export function createFKField(
   const pkField = pkTable.data.fields.find((f) => f.isPrimary);
   if (!pkField) return undefined;
 
-  // Verificar si ya existe un FK hacia esta tabla y campo específico
   const existingFK = fkTable.data.fields.find(
     (f) => f.isForeign && f.references === pkTable.data.name && f.referencesField === pkField.name
   );
 
   if (existingFK) {
-    // Actualizar tipo de relación si se proporciona
     if (relationType && existingFK.relationType !== relationType) {
       existingFK.relationType = relationType;
     }
-    return existingFK; // No crear duplicado
+    return existingFK;
   }
 
-  // 🎯 Lógica UML 2.5 según tipo de relación
   let onDelete: "CASCADE" | "SET NULL" | "RESTRICT" | "NO ACTION" | undefined;
   let onUpdate: "CASCADE" | "SET NULL" | "RESTRICT" | "NO ACTION" | undefined;
   let nullable = false;
   
   switch (relationType) {
     case "COMPOSITION":
-      // ◆ Composición: ciclo de vida dependiente
-      // Si se elimina el "todo", se eliminan las "partes"
       onDelete = "CASCADE";
       onUpdate = "CASCADE";
-      nullable = false; // La parte NO puede existir sin el todo
+      nullable = false;
       break;
       
     case "AGGREGATION":
-      // ◇ Agregación: existencia independiente
-      // Si se elimina el "todo", las "partes" quedan huérfanas pero existen
       onDelete = "SET NULL";
       onUpdate = "NO ACTION";
-      nullable = true; // La parte PUEDE existir sin el todo
+      nullable = true;
       break;
       
     case "ASSOCIATION":
-      // → Asociación: relación bidireccional estándar
-      onDelete = "RESTRICT"; // Evitar eliminación accidental
+      onDelete = "RESTRICT";
       onUpdate = "NO ACTION";
       nullable = true;
       break;
       
     case "1-1":
     case "1-N":
-      // Crow's Foot: comportamiento estándar
       onDelete = "RESTRICT";
       onUpdate = "NO ACTION";
       nullable = false;
       break;
       
     default:
-      // Por defecto: RESTRICT para evitar eliminaciones accidentales
       onDelete = "RESTRICT";
       onUpdate = "NO ACTION";
       nullable = false;
@@ -165,7 +145,7 @@ export function createFKField(
   const newField: Field = {
     id: Date.now(),
     name: `${pkTable.data.name.toLowerCase()}_${pkField.name}`,
-    type: pkField.type,
+    type: pkField.type.toUpperCase().includes("SERIAL") ? "INT" : pkField.type,
     isForeign: true,
     nullable,
     references: pkTable.data.name,
@@ -194,10 +174,6 @@ export function removeFKRelation(
 ): void {
   setEdges((prev) =>
     prev.filter((e) => {
-      // Eliminar edge donde:
-      // - El source es el nodo actual (relaciones salientes)
-      // - O el target es el nodo actual (relaciones entrantes)
-      // - Y el label coincide con el campo FK
       const isRelatedEdge =
         (e.source === nodeId || e.target === nodeId) &&
         (e.label === fieldName || e.label?.includes(fieldName));
@@ -220,14 +196,11 @@ export function removeRelationByReference(
   edges: Edge[],
   nodes: Node<TableData>[]
 ): Edge[] {
-  // Encontrar el nodo de la tabla referenciada
   const targetNode = nodes.find(
     (n) => n.data.name === references || n.data.label === references
   );
 
   if (!targetNode) return edges;
-
-  // Eliminar edges entre estos dos nodos
   return edges.filter((e) => {
     const isRelation =
       (e.source === nodeId && e.target === targetNode.id) ||
@@ -253,7 +226,6 @@ export function updateFKRelation(
   nodes: Node<TableData>[],
   setEdges: React.Dispatch<React.SetStateAction<Edge[]>>
 ): void {
-  // Eliminar relación anterior si existía
   if (oldReference) {
     const filteredEdges = removeRelationByReference(
       nodeId,
@@ -263,6 +235,4 @@ export function updateFKRelation(
     );
     setEdges(filteredEdges);
   }
-
-  // No crear nueva relación aquí, se maneja en handleCreateRelationFromFK
 }

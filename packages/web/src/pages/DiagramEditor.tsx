@@ -26,10 +26,10 @@ import { generateSpringBootProject, downloadSpringBootProject } from "../utils/s
 import { generateFlutterProject, downloadFlutterProject } from "../utils/flutterGenerator";
 import { determinePKFK, createFKField } from "../utils/relationHandler";
 import { getEdgeStyle, UML_SVG_MARKERS } from "../utils/relationStyles";
-// 🧠 AI Integration
+import UmlMultiplicityEdge from "../components/edges/UmlMultiplicityEdge";
+import { getMultiplicitiesFromRelationType } from "../utils/multiplicityHelper";
 import { AIPromptBar } from "../components/AIPromptBar";
 
-// Throttle helper (sin necesidad de lodash)
 function throttle<T extends (...args: any[]) => any>(func: T, delay: number): T {
   let timeout: NodeJS.Timeout | null = null;
   return ((...args: Parameters<T>) => {
@@ -52,7 +52,6 @@ export default function DiagramEditor() {
   const [activeUsers, setActiveUsers] = useState<any[]>([]);
   const [onlineUsers, setOnlineUsers] = useState<any[]>([]);
 
-  // Variable de ayuda para verificar rol y usuario guest
   const isViewer = userRole === "VIEWER";
   const isGuest = user?.id?.startsWith("guest_");
   const inviteToken = searchParams.get("fromInvite");
@@ -70,60 +69,57 @@ export default function DiagramEditor() {
     table: TableNode
   };
 
+  // Tipos de edges personalizados para notación UML 2.5
+  const edgeTypes = React.useMemo(
+    () => ({
+      umlMultiplicity: UmlMultiplicityEdge,
+    }),
+    []
+  );
+
   // Obtener lista de nombres de tablas para el dropdown de FK
   const availableTables = nodes
     .map(n => n.data.name || n.data.label || "Sin nombre");
 
   // Load project if not in store (e.g., direct URL access or F5 refresh)
   useEffect(() => {
-    console.log("🔍 [Editor] projectId from URL:", projectId);
-    console.log("🔍 [Editor] project in store:", project);
-    console.log("🔍 [Editor] user in store:", user);
-
     if (!user) {
-      console.error("🚨 [Editor] No user, redirecting to login");
+      console.error("🚨 Sin usuario, redirigiendo");
       navigate("/");
       return;
     }
 
     if (!project || project.id !== projectId) {
-      console.warn("⚠️ [Editor] Project not in store, loading from backend...");
       api
         .get(`/api/projects/${user.id}`)
         .then((res) => {
           const foundProject = res.data.find((p: any) => p.id === projectId);
           if (!foundProject) {
-            console.error("❌ [Editor] Project not found, redirecting to dashboard");
+            console.error("❌ Proyecto no encontrado");
             navigate("/dashboard");
           } else {
-            console.log("✅ [Editor] Project loaded:", foundProject.name);
             setProject(foundProject);
-            
-            // Verificar rol real del usuario en el proyecto
             return api.get(`/api/projects/role/${projectId}?userId=${user.id}`);
           }
         })
         .then((roleRes) => {
           if (roleRes) {
             const realRole = roleRes.data.role || "VIEWER";
-            console.log("✅ [Editor] User role verified:", realRole);
             setUserRole(realRole);
           }
         })
         .catch((err) => {
-          console.error("❌ [Editor] Failed to load project:", err);
+          console.error("❌ Error cargando proyecto:", err);
           navigate("/dashboard");
         });
     } else {
-      // Proyecto ya en store, verificar rol
       api.get(`/api/projects/role/${projectId}?userId=${user.id}`)
         .then((roleRes) => {
           const realRole = roleRes.data.role || "VIEWER";
-          console.log("✅ [Editor] User role verified:", realRole);
           setUserRole(realRole);
         })
         .catch((err) => {
-          console.error("❌ [Editor] Failed to verify role:", err);
+          console.error("❌ Error verificando rol:", err);
         });
     }
   }, [projectId, user, project, navigate, setProject]);
@@ -131,11 +127,9 @@ export default function DiagramEditor() {
   // 🔄 Cargar diagrama inicial desde BD
   useEffect(() => {
     if (project?.id) {
-      console.log("📂 [Editor] Loading initial diagram for project:", project.id);
       fetch(`/api/diagrams/single/${project.id}`)
         .then((res) => res.json())
         .then((d) => {
-          console.log("📊 [Editor] Diagram loaded:", d);
           if (d?.data) {
             const loadedNodes = d.data.nodes || [];
             const loadedEdges = d.data.edges || [];
@@ -143,17 +137,23 @@ export default function DiagramEditor() {
             setNodes(loadedNodes);
             setEdges(loadedEdges);
             
-            console.log(`✅ [Editor] Loaded ${loadedNodes.length} nodes, ${loadedEdges.length} edges`);
-            
-            // 🔧 Reconstruir edges faltantes desde fields con references
-            // Solo si hay nodos pero no hay edges (o hay menos edges de las esperadas)
             if (loadedNodes.length > 0) {
               const reconstructedEdges: any[] = [];
               
               loadedNodes.forEach((node: any) => {
+                if (node.data?.isJunctionTable) {
+                  console.log(`⏭️  [Editor] Skipping edge reconstruction from junction table: ${node.data.name}`);
+                  return;
+                }
+                
                 const fields = node.data?.fields || [];
                 
                 fields.forEach((field: any) => {
+                  // 🚫 No reconstruir edges que pertenezcan a relaciones N-N
+                  if (field.relationType === "N-N") {
+                    return;
+                  }
+                  
                   // Si el field es FK y tiene references + referencesField
                   if (field.isForeign && field.references && field.referencesField) {
                     // Encontrar el nodo referenciado primero
@@ -175,24 +175,14 @@ export default function DiagramEditor() {
                       // Obtener estilo según tipo de relación
                         const edgeStyle = getEdgeStyle(field.relationType || "1-N");
                         
-                        // Mapear tipo a label legible en español
-                        const labelMap: Record<string, string> = {
-                          "1-1": "1‒1",
-                          "1-N": "1‒N",
-                          "N-N": "N‒N",
-                          "ASSOCIATION": "Asociación",
-                          "AGGREGATION": "Agregación",
-                          "COMPOSITION": "Composición",
-                          "INHERITANCE": "Herencia",
-                          "DEPENDENCY": "Dependencia",
-                          "REALIZATION": "Realización"
-                        };
+                        // 🆕 UML 2.5: Obtener multiplicidades para los extremos
+                        const multiplicities = getMultiplicitiesFromRelationType(field.relationType || "1-N");
                         
                       const reconstructedEdge: any = {
                         id: `edge-${targetNode.id}-${node.id}-${field.name}`,
                         source: targetNode.id,  // Tabla con PK
                         target: node.id,        // Tabla con FK
-                        label: labelMap[field.relationType || "1-N"] || field.relationType || "1‒N",
+                        type: "umlMultiplicity", // 🆕 Usar edge personalizado con multiplicidades
                         animated: edgeStyle.animated,
                         style: { 
                           stroke: edgeStyle.stroke, 
@@ -201,24 +191,21 @@ export default function DiagramEditor() {
                           // Agregar markerEnd desde el style si existe (para UML markers personalizados)
                           ...(edgeStyle.style || {})
                         },
-                        type: edgeStyle.type,
-                        labelStyle: { 
-                          fill: edgeStyle.stroke, 
-                          fontWeight: 700, 
-                          fontSize: 13,
-                          textShadow: "0 1px 3px rgba(0,0,0,0.8)"
-                        },
-                        labelBgStyle: edgeStyle.labelBgStyle,
                         markerEnd: typeof edgeStyle.markerEnd === 'object' ? {
                           type: (edgeStyle.markerEnd as any).type,
                           color: (edgeStyle.markerEnd as any).color,
                           width: 20,
                           height: 20
-                        } : undefined,
+                        } : (field.relationType === "1-N" || field.relationType === "ASSOCIATION" ? {
+                          type: 'arrowclosed',
+                          color: edgeStyle.stroke
+                        } : undefined),
                         data: {
                           sourceField: field.referencesField,  // Campo PK
                           targetField: field.name,             // Campo FK
-                          relationType: field.relationType || "1-N"
+                          relationType: field.relationType || "1-N",
+                          sourceMultiplicity: multiplicities.sourceMultiplicity, // 🆕 Multiplicidad en extremo source
+                          targetMultiplicity: multiplicities.targetMultiplicity  // 🆕 Multiplicidad en extremo target
                         }
                       };
                       
@@ -243,12 +230,9 @@ export default function DiagramEditor() {
 
   // 🔌 Unirse a proyecto y configurar WebSocket
   useEffect(() => {
-    if (!user || !project || !socket) {
-      console.warn("⚠️ [Editor] Skipping socket setup (no user/project/socket)");
-      return;
-    }
+    if (!user || !project || !socket) return;
 
-    console.log("🎨 [Editor] Joining project", project.id, "as", user.id);
+    console.log("🎨 Uniéndose al proyecto", project.id);
     
     // Enviar info completa del usuario para presencia (sin rol, el backend lo obtiene de DB)
     socket.emit("join-project", { 
@@ -258,17 +242,14 @@ export default function DiagramEditor() {
     });
 
     const onConnect = () => {
-      console.log("🟢 [Editor] WebSocket connected");
       setConnected(true);
     };
 
     const onDisconnect = () => {
-      console.log("🔴 [Editor] WebSocket disconnected");
       setConnected(false);
     };
 
     const onPresenceUpdate = (users: any[]) => {
-      console.log("📡 [Editor] Presence update:", users.length, "user(s) online");
       setOnlineUsers(users);
       
       // Actualizar rol del usuario actual basado en presencia
@@ -280,12 +261,10 @@ export default function DiagramEditor() {
     };
 
     const onWarning = (data: any) => {
-      console.warn("⚠️ [Editor] Warning:", data.message);
       alert(data.message);
     };
 
     const onError = (data: any) => {
-      console.error("🚨 [Editor] Error:", data.message);
       alert("Error: " + data.message);
     };
 
@@ -296,7 +275,6 @@ export default function DiagramEditor() {
     socket.on("error", onError);
 
     return () => {
-      console.log("🧹 [Editor] Cleaning up socket listeners");
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("presence-update", onPresenceUpdate);
@@ -305,27 +283,19 @@ export default function DiagramEditor() {
     };
   }, [user, project, socket]);
 
-  //Pings automáticos para mantener presencia activa (cada 30s)
   useEffect(() => {
     if (!user || !project || !socket) return;
 
-    console.log("[Editor] Starting presence ping interval");
     const interval = setInterval(() => {
       socket.emit("ping-diagram", { projectId: project.id, userId: user.id });
-      console.log("[Editor] Ping sent");
     }, 30000);
 
-    return () => {
-      console.log("💓 [Editor] Stopping presence ping interval");
-      clearInterval(interval);
-    };
+    return () => clearInterval(interval);
   }, [user, project, socket]);
 
-  // 🚪 Cerrar socket automáticamente al salir del proyecto
   useEffect(() => {
     const handleBeforeUnload = () => {
       if (project && user && socket) {
-        console.log("🚪 [Editor] Leaving project before unload");
         socket.emit("leave-project", { projectId: project.id, userId: user.id });
         disconnectSocket();
       }
@@ -473,7 +443,6 @@ export default function DiagramEditor() {
       },
     };
 
-    console.log("➕ [Editor] Adding local table node:", id);
     setNodes((nds: Node[]) => [...nds, newNode]);
 
     socket.emit("diagram-change", {
@@ -485,9 +454,6 @@ export default function DiagramEditor() {
 
   // 📝 Manejar actualización de nodo desde PropertiesPanel
   const handleNodeUpdate = useCallback((nodeId: string, updatedData: any) => {
-    console.log("📝 [Editor] Node data updated from PropertiesPanel:", nodeId, updatedData);
-    
-    // Actualizar localmente de inmediato
     setNodes((nds: Node[]) =>
       nds.map((n: Node) =>
         n.id === nodeId 
@@ -510,14 +476,8 @@ export default function DiagramEditor() {
   // 🎯 Detectar cuando se suelta un nodo (al final del drag)
   const onNodeDragStop = useCallback(
     (event: React.MouseEvent, node: Node) => {
-      if (userRole === "VIEWER") {
-        console.warn("⚠️ [Editor] VIEWER cannot move nodes");
-        return;
-      }
+      if (userRole === "VIEWER") return;
 
-      console.log("🎯 [Editor] Node drag stopped:", node.id, node.position);
-      
-      // Actualizar posición localmente de inmediato
       setNodes((nds: Node[]) =>
         nds.map((n: Node) =>
           n.id === node.id ? { ...n, position: node.position } : n
@@ -572,30 +532,25 @@ export default function DiagramEditor() {
 
       // Importar dinámicamente la función de modal
       const { askRelationType } = await import("../utils/relationPrompt");
-      const relationType = await askRelationType();
+      const relationConfig = await askRelationType();
 
-      if (!relationType) return; // Cancelado
+      if (!relationConfig) return; // Cancelado
 
-      // No normalizar el tipo, mantener el valor exacto del enum
-      const selectedType = relationType;
+      const relationType = relationConfig.type;
+      const multiplicity = relationConfig.multiplicity;
       
-      console.log("🔗 [Editor] Selected relation type:", selectedType);
-      
-      // Obtener nodos source y target
       const sourceNode = nodes.find(n => n.id === connection.source);
       const targetNode = nodes.find(n => n.id === connection.target);
       
       if (!sourceNode || !targetNode) {
-        console.error("❌ [Editor] Source or target node not found");
+        console.error("❌ Nodos no encontrados");
         return;
       }
 
-      // 🎯 CREAR TABLA INTERMEDIA AUTOMÁTICA PARA N-N
-      if (selectedType === "N-N") {
+      if (relationType === "N-N") {
         const sourceTableName = sourceNode.data.name || sourceNode.data.label || "tabla1";
         const targetTableName = targetNode.data.name || targetNode.data.label || "tabla2";
         
-        // 🆕 Detectar campos PK de ambas tablas para la relación N-N
         const sourcePK = sourceNode.data.fields.find((f: any) => f.isPrimary);
         const targetPK = targetNode.data.fields.find((f: any) => f.isPrimary);
         const sourcePKName = sourcePK?.name || "id";
@@ -612,96 +567,86 @@ export default function DiagramEditor() {
           data: {
             name: `${sourceTableName}_${targetTableName}`,
             label: `${sourceTableName}_${targetTableName}`,
+            isJunctionTable: true,
             fields: [
               { 
                 id: Date.now() + 1, 
-                name: `${sourceTableName}_${sourcePKName}`, // 🆕 Incluir nombre del PK
+                name: `${sourceTableName}_${sourcePKName}`,
                 type: sourcePK?.type || "INT", 
                 isForeign: true, 
                 nullable: false,
                 references: sourceTableName,
-                referencesField: sourcePKName // 🆕 Campo PK específico
+                referencesField: sourcePKName,
+                relationType: "N-N"
               },
               { 
                 id: Date.now() + 2, 
-                name: `${targetTableName}_${targetPKName}`, // 🆕 Incluir nombre del PK
+                name: `${targetTableName}_${targetPKName}`,
                 type: targetPK?.type || "INT", 
                 isForeign: true, 
                 nullable: false,
                 references: targetTableName,
-                referencesField: targetPKName // 🆕 Campo PK específico
+                referencesField: targetPKName,
+                relationType: "N-N"
               },
             ],
           },
         };
 
-        console.log("🔗 [Editor] Creating junction table for N-N:", joinTableId);
-        console.log("🔗 [Editor] FK fields:", `${sourceTableName}_${sourcePKName}`, `${targetTableName}_${targetPKName}`);
-        
-        // Crear edges desde la tabla intermedia a las tablas originales
         const edgeStyle1 = getEdgeStyle("1-N");
         const edgeStyle2 = getEdgeStyle("1-N");
 
         const edge1: Edge = {
           id: `edge-${Date.now()}-1`,
-          source: connection.source!,  // 🔄 Tabla source (tiene PK)
-          target: joinTableId,          // 🔄 Tabla intermedia (tiene FK)
-          label: "1-N",
+          source: connection.source!,
+          target: joinTableId,
+          type: "umlMultiplicity",
           animated: edgeStyle1.animated,
           style: { 
             stroke: edgeStyle1.stroke, 
             strokeWidth: edgeStyle1.strokeWidth,
             strokeDasharray: edgeStyle1.strokeDasharray
           },
-          type: edgeStyle1.type,
-          labelStyle: { fill: edgeStyle1.stroke, fontWeight: 700, fontSize: 13 },
-          labelBgStyle: edgeStyle1.labelBgStyle,
           markerEnd: { type: 'arrowclosed', color: edgeStyle1.stroke },
-          // 🆕 Agregar campos específicos
           data: {
             sourceField: sourcePKName,
             targetField: `${sourceTableName}_${sourcePKName}`,
-            relationType: "1-N"
+            relationType: "1-N",
+            sourceMultiplicity: "",
+            targetMultiplicity: ""
           }
         };
 
         const edge2: Edge = {
           id: `edge-${Date.now()}-2`,
-          source: connection.target!,  // 🔄 Tabla target (tiene PK)
-          target: joinTableId,          // 🔄 Tabla intermedia (tiene FK)
-          label: "1-N",
+          source: connection.target!,
+          target: joinTableId,
+          type: "umlMultiplicity",
           animated: edgeStyle2.animated,
           style: { 
             stroke: edgeStyle2.stroke, 
             strokeWidth: edgeStyle2.strokeWidth,
             strokeDasharray: edgeStyle2.strokeDasharray
           },
-          type: edgeStyle2.type,
-          labelStyle: { fill: edgeStyle2.stroke, fontWeight: 700, fontSize: 13 },
-          labelBgStyle: edgeStyle2.labelBgStyle,
           markerEnd: { type: 'arrowclosed', color: edgeStyle2.stroke },
-          // 🆕 Agregar campos específicos
           data: {
             sourceField: targetPKName,
             targetField: `${targetTableName}_${targetPKName}`,
-            relationType: "1-N"
+            relationType: "1-N",
+            sourceMultiplicity: "",
+            targetMultiplicity: ""
           }
         };
 
-        // ⚡ ACTUALIZACIÓN BATCH: Primero actualizar estado local
         setNodes((nds: Node[]) => [...nds, joinTableNode]);
         setEdges((eds: Edge[]) => [...eds, edge1, edge2]);
 
-        // ⚡ EMITIR CAMBIOS EN SECUENCIA CON DELAYS para evitar condiciones de carrera
-        console.log("📡 [Editor] Emitting N-N junction table and edges...");
-        
         socket.emit("diagram-change", {
           projectId: project.id,
           action: "ADD_NODE",
           payload: joinTableNode,
         });
 
-        // Pequeño delay entre eventos para asegurar persistencia
         setTimeout(() => {
           socket.emit("diagram-change", {
             projectId: project.id,
@@ -718,94 +663,63 @@ export default function DiagramEditor() {
           });
         }, 100);
 
-        return; // No crear la relación directa N-N
+        return;
       }
 
-      // 🔍 Detectar automáticamente PK/FK para relaciones que requieren FK
-      // UML tipos que NO requieren FK: DEPENDENCY, REALIZATION (solo visuales)
-      // INHERITANCE crea FK especial durante implementInheritance()
-      const requiresFK = !["DEPENDENCY", "REALIZATION"].includes(selectedType) && selectedType !== "INHERITANCE";
+      const requiresFK = !["DEPENDENCY", "REALIZATION"].includes(relationType) && relationType !== "INHERITANCE";
       
       let pkTable = sourceNode;
       let fkTable = targetNode;
       let fkField = null;
-      let shouldInvertEdge = false; // Para AGGREGATION/COMPOSITION puede ser necesario invertir
-      
-      // 🔼 Manejar HERENCIA: copiar campos del padre al hijo
-      if (selectedType === "INHERITANCE") {
-        // En herencia: source = clase hija, target = clase padre
-        const childTable = sourceNode;
-        const parentTable = targetNode;
-        
-        const { implementInheritance } = await import("../utils/relationHandler");
-        const inheritedFields = implementInheritance(childTable, parentTable);
-        
-        if (inheritedFields.length > 0) {
-          // Actualizar el nodo hijo con los campos heredados
-          setNodes((nds: Node[]) => 
-            nds.map((n: Node) => 
-              n.id === childTable.id 
-                ? { ...n, data: { ...n.data, fields: childTable.data.fields } }
-                : n
-            )
-          );
-
-          // Sincronizar el nodo actualizado
-          socket.emit("diagram-change", {
-            projectId: project.id,
-            action: "UPDATE_NODE",
-            payload: {
-              id: childTable.id,
-              data: childTable.data
-            },
-          });
-          
-          console.log(`✅ [Editor] Inheritance: ${childTable.data.name} extended with ${inheritedFields.length} fields from ${parentTable.data.name}`);
-        }
-      }
+      let shouldInvertEdge = false;
       
       if (requiresFK) {
-        // 🎯 Lógica diferenciada según tipo UML:
         
-        if (selectedType === "AGGREGATION" || selectedType === "COMPOSITION") {
-          // ◇/◆ AGREGACIÓN/COMPOSICIÓN:
-          // El rombo (markerEnd) indica el lado "todo" (whole)
-          // La FK SIEMPRE va en el lado "parte" (source)
-          // Target = Todo, Source = Parte
-          pkTable = targetNode;  // El todo tiene la PK
-          fkTable = sourceNode;  // La parte tiene la FK
+        if (relationType === "AGGREGATION" || relationType === "COMPOSITION") {
+          // ◇/◆ AGREGACIÓN/COMPOSICIÓN según UML 2.5:
+          // El rombo SIEMPRE se dibuja del lado del "TODO" (contenedor)
+          // La FK SIEMPRE va en el lado de las "PARTES" (contenidas)
+          // 
+          // React Flow: markerEnd aparece en el TARGET
+          // Por lo tanto: TARGET = TODO (tiene rombo), SOURCE = PARTES (tiene FK)
+          pkTable = targetNode;  // El TODO tiene la PK
+          fkTable = sourceNode;  // Las PARTES tienen la FK
           
-          console.log(`🔷 [${selectedType}] Rombo en target (${targetNode.data.name}), FK en source (${sourceNode.data.name})`);
+          console.log(`🔷 [${relationType}] TODO: ${targetNode.data.name} (rombo), PARTES: ${sourceNode.data.name} (FK)`);
+          
+        } else if (relationType === "1-1") {
+          // 1-1: FK puede ir en cualquier tabla
+          // Por convención, ponemos FK en la tabla target (segundo nodo seleccionado)
+          pkTable = sourceNode;
+          fkTable = targetNode;
+          console.log(`🔗 [1-1] PK en ${sourceNode.data.name}, FK en ${targetNode.data.name}`);
+          
+        } else if (relationType === "1-N") {
+          // 1-N: FK SIEMPRE va en el lado "N" (muchos)
+          // Source = lado "1" (uno), Target = lado "N" (muchos)
+          pkTable = sourceNode;  // El "1" tiene la PK
+          fkTable = targetNode;  // El "N" tiene la FK
+          console.log(`🔗 [1-N] Lado 1: ${sourceNode.data.name} (PK), Lado N: ${targetNode.data.name} (FK)`);
+          
+        } else if (relationType === "ASSOCIATION") {
+          // ASSOCIATION: FK va hacia donde apunta la flecha (target)
+          // Source → Target: FK en target
+          pkTable = sourceNode;
+          fkTable = targetNode;
+          console.log(`🔗 [ASSOCIATION] Flecha apunta a ${targetNode.data.name}, FK en ${targetNode.data.name}`);
           
         } else {
-          // ASSOCIATION, 1-1, 1-N, N-N, FK:
-          // Usar lógica basada en handles (dónde conecta el usuario)
-          if (connection.targetHandle === 'top') {
-            // Conectó al handle superior del target → FK va en target
-            pkTable = sourceNode;
-            fkTable = targetNode;
-          } else if (connection.targetHandle === 'bottom') {
-            // Conectó al handle inferior del target → FK va en source
-            pkTable = targetNode;
-            fkTable = sourceNode;
-          } else {
-            // Fallback: usar la lógica original si no hay handles definidos
-            const detected = determinePKFK(sourceNode, targetNode);
-            pkTable = detected.pkTable;
-            fkTable = detected.fkTable;
-          }
+          const detected = determinePKFK(sourceNode, targetNode);
+          pkTable = detected.pkTable;
+          fkTable = detected.fkTable;
         }
         
-        // 🔗 Crear campo FK automáticamente en la tabla foránea
-        fkField = createFKField(fkTable, pkTable, selectedType);
+        fkField = createFKField(fkTable, pkTable, relationType);
       }
       
-      // 🆕 Detectar campos PK y FK para el edge (solo si se creó FK)
       const pkField = pkTable.data.fields.find((f: any) => f.isPrimary);
       
       if (fkField && pkField && requiresFK) {
-        console.log("✅ [Editor] Created FK field:", fkField.name, "in", fkTable.data.name, "type:", selectedType);
-        console.log("🔗 [Editor] PK field:", pkField.name, "FK field:", fkField.name);
         
         // Actualizar el nodo con el nuevo campo
         setNodes((nds: Node[]) => 
@@ -816,7 +730,7 @@ export default function DiagramEditor() {
           )
         );
 
-        // Sincronizar el nodo actualizado
+        // Sincronizar el nodo actualizado PRIMERO
         socket.emit("diagram-change", {
           projectId: project.id,
           action: "UPDATE_NODE",
@@ -825,64 +739,46 @@ export default function DiagramEditor() {
             data: fkTable.data
           },
         });
+
+        // Esperar 100ms para asegurar que el nodo se guarde antes del edge
+        await new Promise(resolve => setTimeout(resolve, 100));
       }
 
       // Obtener estilo según el tipo seleccionado (sin conversión)
-      const edgeStyle = getEdgeStyle(selectedType);
+      const edgeStyle = getEdgeStyle(relationType);
       
-      // Mapear nombres de tipos UML a labels legibles
-      const labelMap: Record<string, string> = {
-        "1-1": "1‒1",
-        "1-N": "1‒N",
-        "N-N": "N‒N",
-        "ASSOCIATION": "Asociación",
-        "AGGREGATION": "Agregación",
-        "COMPOSITION": "Composición",
-        "INHERITANCE": "Herencia",
-        "DEPENDENCY": "Dependencia",
-        "REALIZATION": "Realización"
-      };
+      // 🆕 UML 2.5: Obtener multiplicidades para los extremos (con multiplicidad personalizada)
+      const multiplicities = getMultiplicitiesFromRelationType(relationType, multiplicity);
 
-      // 🎯 Mantener la dirección visual como el usuario la arrastró
-      // La semántica (dónde va la FK) ya está correctamente definida arriba
       const newEdge: Edge = {
         id: `edge-${connection.source}-${connection.target}-${Date.now()}`,
         source: connection.source!,
         target: connection.target!,
         sourceHandle: connection.sourceHandle,
         targetHandle: connection.targetHandle,
-        label: labelMap[selectedType] || selectedType,
+        type: "umlMultiplicity",
         animated: edgeStyle.animated,
         style: { 
           stroke: edgeStyle.stroke, 
           strokeWidth: edgeStyle.strokeWidth,
           strokeDasharray: edgeStyle.strokeDasharray,
-          // Agregar markerEnd desde el style si existe (para UML markers personalizados)
           ...(edgeStyle.style || {})
         },
-        type: edgeStyle.type,
-        labelStyle: { 
-          fill: edgeStyle.stroke, 
-          fontWeight: 700, 
-          fontSize: 13,
-          textShadow: "0 1px 3px rgba(0,0,0,0.8)"
-        },
-        labelBgStyle: edgeStyle.labelBgStyle,
         markerEnd: typeof edgeStyle.markerEnd === 'object' ? {
           type: (edgeStyle.markerEnd as any).type,
           color: (edgeStyle.markerEnd as any).color,
           width: 20,
           height: 20
         } : undefined,
-        // 🆕 Agregar campos específicos a la edge
         data: {
-          sourceField: pkField?.name, // Nombre del campo PK (ej: "id_proveedor")
-          targetField: fkField?.name, // Nombre del campo FK (ej: "proveedor_id_proveedor")
-          relationType: selectedType
+          sourceField: pkField?.name,
+          targetField: fkField?.name,
+          relationType: relationType,
+          sourceMultiplicity: multiplicities.sourceMultiplicity,
+          targetMultiplicity: multiplicities.targetMultiplicity
         }
       };
 
-      console.log("🔗 [Editor] Adding edge:", newEdge.id, "Type:", selectedType, "Fields:", pkField?.name, "→", fkField?.name);
       setEdges((eds: Edge[]) => addEdge(newEdge, eds));
 
       socket.emit("diagram-change", {
@@ -924,29 +820,30 @@ export default function DiagramEditor() {
 
       // Obtener estilo unificado para relaciones FK
       const edgeStyle = getEdgeStyle("FK");
+      
+      // 🆕 UML 2.5: Obtener multiplicidades
+      const multiplicities = getMultiplicitiesFromRelationType("FK");
 
       // Crear edge 1-N (tabla referenciada → tabla con FK)
       const newEdge: Edge = {
         id: `edge-fk-${Date.now()}`,
         source: targetNode.id,
         target: sourceNodeId,
-        label: "1‒N",  // Ya está en español
+        type: "umlMultiplicity", // 🆕 Usar edge personalizado
         animated: edgeStyle.animated,
         style: { 
           stroke: edgeStyle.stroke, 
           strokeWidth: edgeStyle.strokeWidth,
           strokeDasharray: edgeStyle.strokeDasharray
         },
-        type: edgeStyle.type,
-        labelStyle: { 
-          fill: edgeStyle.stroke, 
-          fontWeight: 700, 
-          fontSize: 12
-        },
-        labelBgStyle: edgeStyle.labelBgStyle,
         markerEnd: {
           type: 'arrowclosed',
           color: edgeStyle.stroke
+        },
+        data: {
+          relationType: "FK",
+          sourceMultiplicity: multiplicities.sourceMultiplicity,
+          targetMultiplicity: multiplicities.targetMultiplicity
         }
       };
 
@@ -1176,8 +1073,9 @@ export default function DiagramEditor() {
       const deferredAddFields: any[] = [];
       const deferredRenames: any[] = [];
       
-      // Crear una referencia a los nodos actualizados durante el proceso
+      // Crear una referencia a los nodos y edges actualizados durante el proceso
       let updatedNodes = [...nodes];
+      let updatedEdges = [...edges];
 
       // 🔹 Primera pasada: ejecutar todo excepto AddField y RenameTable
       for (const action of actions) {
@@ -1213,6 +1111,11 @@ export default function DiagramEditor() {
                     isPrimary: f.isPrimary || false,
                     isForeign: f.isForeign || false,
                     nullable: f.nullable !== false, // Default true
+                    references: f.references,
+                    referencesField: f.referencesField,
+                    relationType: f.relationType,
+                    onDelete: f.onDelete,
+                    onUpdate: f.onUpdate,
                   })),
                 },
               };
@@ -1228,13 +1131,55 @@ export default function DiagramEditor() {
                 payload: newNode,
               });
 
-              console.log(`✅ [AI] Created table: ${action.name}`);
+              // 🆕 Crear edges automáticamente para campos FK con references + referencesField
+              const fkFields = action.fields.filter((f: any) => f.isForeign && f.references && f.referencesField);
+              for (const fkField of fkFields) {
+                const targetNode = updatedNodes.find((n) => 
+                  n.data.name?.toLowerCase() === fkField.references?.toLowerCase() || 
+                  n.data.label?.toLowerCase() === fkField.references?.toLowerCase()
+                );
+
+                if (targetNode) {
+                  const edgeStyle = getEdgeStyle(fkField.relationType || "ASSOCIATION");
+                  const multiplicities = getMultiplicitiesFromRelationType(fkField.relationType || "ASSOCIATION");
+
+                  const newEdge: Edge = {
+                    id: `edge-${Date.now()}-${Math.random()}`,
+                    source: targetNode.id,
+                    target: nodeId,
+                    type: "uml-multiplicity",
+                    data: {
+                      relationType: fkField.relationType || "ASSOCIATION",
+                      sourceField: fkField.referencesField,
+                      targetField: fkField.name,
+                      sourceMultiplicity: multiplicities.source,
+                      targetMultiplicity: multiplicities.target,
+                      onDelete: fkField.onDelete,
+                      onUpdate: fkField.onUpdate,
+                    },
+                    ...edgeStyle,
+                  };
+
+                  updatedEdges = [...updatedEdges, newEdge];
+                  setEdges((eds: Edge[]) => [...eds, newEdge]);
+
+                  // Esperar 100ms para asegurar que el nodo FK esté guardado
+                  await new Promise(resolve => setTimeout(resolve, 100));
+
+                  socket.emit("diagram-change", {
+                    projectId: project.id,
+                    action: "ADD_EDGE",
+                    payload: newEdge,
+                  });
+
+                  console.log(`✅ [AI] Auto-created edge for FK: ${targetNode.data.name}.${fkField.referencesField} → ${action.name}.${fkField.name}`);
+                }
+              }
+
               break;
             }
 
             case "CreateRelation": {
-              console.log(`🔍 [AI] Processing CreateRelation:`, action);
-              console.log(`🔍 [AI] Available nodes:`, updatedNodes.map(n => ({ id: n.id, name: n.data.name })));
               
               // Buscar nodos source y target por nombre en updatedNodes (case-insensitive)
               const sourceNode = updatedNodes.find(
@@ -1264,82 +1209,36 @@ export default function DiagramEditor() {
               // Si hay relationType (INHERITANCE, COMPOSITION, etc.), usarlo directamente
               if (action.relationType) {
                 relationType = action.relationType;
+                console.log(`🎯 [AI] Using relationType from action: ${relationType}`);
               }
               // Si no hay relationType pero hay cardinality, mapear cardinalidades clásicas
               else if (action.cardinality) {
                 if (action.cardinality === "ONE_TO_ONE") relationType = "1-1";
                 if (action.cardinality === "ONE_TO_MANY") relationType = "1-N";
                 if (action.cardinality === "MANY_TO_MANY") relationType = "N-N";
+                console.log(`🎯 [AI] Mapped cardinality ${action.cardinality} to ${relationType}`);
               }
 
               console.log(
                 `🔗 [AI] Creating ${relationType} relation: ${action.fromTable} → ${action.toTable}`
               );
 
-              // 🔼 Manejar HERENCIA: crear FK especial en hijo hacia padre
+              // 🔹 Caso 1: HERENCIA (solo edge visual, sin FK)
               if (relationType === "INHERITANCE") {
-                console.log(`🔼 [AI] Processing INHERITANCE: ${sourceNode.data.name} → ${targetNode.data.name}`);
-                const childTable = sourceNode;  // fromTable = hijo
-                const parentTable = targetNode; // toTable = padre
+                console.log(`🔥 [AI] Entering INHERITANCE case block`);
+                const childTable = sourceNode;
+                const parentTable = targetNode;
                 
-                const { implementInheritance } = await import("../utils/relationHandler");
-                const inheritedFields = implementInheritance(childTable, parentTable);
-                console.log(`🔼 [AI] Inherited fields:`, inheritedFields);
-                
-                if (inheritedFields.length > 0) {
-                  // Actualizar referencia local
-                  updatedNodes = updatedNodes.map((n: Node) =>
-                    n.id === childTable.id
-                      ? { ...n, data: { ...n.data, fields: childTable.data.fields } }
-                      : n
-                  );
-                  
-                  // Actualizar el nodo hijo con el FK de herencia
-                  setNodes((nds: Node[]) => 
-                    nds.map((n: Node) => 
-                      n.id === childTable.id 
-                        ? { ...n, data: { ...n.data, fields: childTable.data.fields } }
-                        : n
-                    )
-                  );
-
-                  // Sincronizar el nodo actualizado
-                  socket.emit("diagram-change", {
-                    projectId: project.id,
-                    action: "UPDATE_NODE",
-                    payload: {
-                      id: childTable.id,
-                      data: childTable.data
-                    },
-                  });
-                  
-                  console.log(`✅ [AI] Inheritance: ${childTable.data.name} extended from ${parentTable.data.name}`);
-                }
-                
-                // Crear edge de herencia
                 const edgeStyle = getEdgeStyle("INHERITANCE");
-                const labelMap: Record<string, string> = {
-                  "1-1": "1‒1",
-                  "1-N": "1‒N",
-                  "N-N": "N‒N",
-                  "ASSOCIATION": "Asociación",
-                  "AGGREGATION": "Agregación",
-                  "COMPOSITION": "Composición",
-                  "INHERITANCE": "Herencia",
-                  "DEPENDENCY": "Dependencia",
-                  "REALIZATION": "Realización"
-                };
+                const multiplicities = getMultiplicitiesFromRelationType("INHERITANCE");
                 
                 const pkField = parentTable.data.fields.find((f: any) => f.isPrimary);
-                const fkField = childTable.data.fields.find((f: any) => 
-                  f.isForeign && f.references === parentTable.data.name
-                );
                 
                 const newEdge: Edge = {
                   id: `edge-${Date.now()}`,
                   source: childTable.id,
                   target: parentTable.id,
-                  label: labelMap["INHERITANCE"],
+                  type: "umlMultiplicity",
                   animated: edgeStyle.animated,
                   style: {
                     stroke: edgeStyle.stroke,
@@ -1347,14 +1246,6 @@ export default function DiagramEditor() {
                     strokeDasharray: edgeStyle.strokeDasharray,
                     ...(edgeStyle.style || {})
                   },
-                  type: edgeStyle.type,
-                  labelStyle: {
-                    fill: edgeStyle.stroke,
-                    fontWeight: 700,
-                    fontSize: 13,
-                    textShadow: "0 1px 3px rgba(0,0,0,0.8)"
-                  },
-                  labelBgStyle: edgeStyle.labelBgStyle,
                   markerEnd: typeof edgeStyle.markerEnd === 'object' ? {
                     type: (edgeStyle.markerEnd as any).type,
                     color: (edgeStyle.markerEnd as any).color,
@@ -1362,14 +1253,17 @@ export default function DiagramEditor() {
                     height: 20
                   } : undefined,
                   data: {
-                    sourceField: fkField?.name,
+                    sourceField: undefined,
                     targetField: pkField?.name,
                     relationType: "INHERITANCE",
                     onDelete: action.onDelete || "CASCADE",
-                    onUpdate: action.onUpdate || "CASCADE"
+                    onUpdate: action.onUpdate || "CASCADE",
+                    sourceMultiplicity: multiplicities.sourceMultiplicity,
+                    targetMultiplicity: multiplicities.targetMultiplicity
                   },
                 };
 
+                updatedEdges = [...updatedEdges, newEdge];
                 setEdges((eds: Edge[]) => [...eds, newEdge]);
 
                 socket.emit("diagram-change", {
@@ -1378,10 +1272,11 @@ export default function DiagramEditor() {
                   payload: newEdge,
                 });
                 
-                console.log(`✅ [AI] Created inheritance relation: ${action.fromTable} → ${action.toTable}`);
-                // No hacer break aquí, continuar al flujo normal
+                console.log(`✅ [AI] Created INHERITANCE relation (visual only, no FK) - Edge ID: ${newEdge.id}`);
+                console.log(`✅ [AI] Edge details:`, newEdge);
+                break; // Importante: salir del switch para no caer en otros casos
               }
-              // Para N-N, crear tabla intermedia automáticamente
+              // 🔹 Caso 2: RELACIÓN N-N (tabla intermedia)
               else if (relationType === "N-N") {
                 const sourcePK = sourceNode.data.fields.find((f: any) => f.isPrimary);
                 const targetPK = targetNode.data.fields.find((f: any) => f.isPrimary);
@@ -1404,7 +1299,7 @@ export default function DiagramEditor() {
                       {
                         id: Date.now() + 1,
                         name: `${action.fromTable}_${sourcePKName}`,
-                        type: sourcePK?.type || "INT",
+                        type: sourcePK?.type.toUpperCase().includes("SERIAL") ? "INT" : (sourcePK?.type || "INT"),
                         isForeign: true,
                         nullable: false,
                         references: action.fromTable,
@@ -1413,7 +1308,7 @@ export default function DiagramEditor() {
                       {
                         id: Date.now() + 2,
                         name: `${action.toTable}_${targetPKName}`,
-                        type: targetPK?.type || "INT",
+                        type: targetPK?.type.toUpperCase().includes("SERIAL") ? "INT" : (targetPK?.type || "INT"),
                         isForeign: true,
                         nullable: false,
                         references: action.toTable,
@@ -1426,26 +1321,27 @@ export default function DiagramEditor() {
                 // Crear edges
                 const edgeStyle1 = getEdgeStyle("1-N");
                 const edgeStyle2 = getEdgeStyle("1-N");
+                
+                // ⚠️ UML 2.5: En N-N las multiplicidades hacia tabla intermedia se sobreentienden
 
                 const edge1: Edge = {
                   id: `edge-${Date.now()}-1`,
                   source: sourceNode.id,
                   target: joinTableId,
-                  label: "1-N",
+                  type: "umlMultiplicity", // 🆕 Usar edge personalizado
                   animated: edgeStyle1.animated,
                   style: {
                     stroke: edgeStyle1.stroke,
                     strokeWidth: edgeStyle1.strokeWidth,
                     strokeDasharray: edgeStyle1.strokeDasharray,
                   },
-                  type: edgeStyle1.type,
-                  labelStyle: { fill: edgeStyle1.stroke, fontWeight: 700, fontSize: 13 },
-                  labelBgStyle: edgeStyle1.labelBgStyle,
                   markerEnd: { type: "arrowclosed", color: edgeStyle1.stroke },
                   data: {
                     sourceField: sourcePKName,
                     targetField: `${action.fromTable}_${sourcePKName}`,
                     relationType: "1-N",
+                    sourceMultiplicity: "",  // Vacío: no se muestra
+                    targetMultiplicity: ""   // Vacío: no se muestra
                   },
                 };
 
@@ -1453,21 +1349,20 @@ export default function DiagramEditor() {
                   id: `edge-${Date.now()}-2`,
                   source: targetNode.id,
                   target: joinTableId,
-                  label: "1-N",
+                  type: "umlMultiplicity", // 🆕 Usar edge personalizado
                   animated: edgeStyle2.animated,
                   style: {
                     stroke: edgeStyle2.stroke,
                     strokeWidth: edgeStyle2.strokeWidth,
                     strokeDasharray: edgeStyle2.strokeDasharray,
                   },
-                  type: edgeStyle2.type,
-                  labelStyle: { fill: edgeStyle2.stroke, fontWeight: 700, fontSize: 13 },
-                  labelBgStyle: edgeStyle2.labelBgStyle,
                   markerEnd: { type: "arrowclosed", color: edgeStyle2.stroke },
                   data: {
                     sourceField: targetPKName,
                     targetField: `${action.toTable}_${targetPKName}`,
                     relationType: "1-N",
+                    sourceMultiplicity: "",  // Vacío: no se muestra
+                    targetMultiplicity: ""   // Vacío: no se muestra
                   },
                 };
 
@@ -1499,7 +1394,8 @@ export default function DiagramEditor() {
                   });
                 }, 100);
               } else {
-                // Para 1-1 y 1-N, crear FK y edge
+                // 🔹 Caso 3: Resto de relaciones (COMPOSITION, AGGREGATION, ASSOCIATION, 1-1, 1-N)
+                // Todas estas generan FK física en la tabla destino
                 const { pkTable, fkTable } = determinePKFK(sourceNode, targetNode);
                 const fkField = createFKField(fkTable, pkTable, relationType);
                 const pkField = pkTable.data.fields.find((f: any) => f.isPrimary);
@@ -1530,27 +1426,20 @@ export default function DiagramEditor() {
                     },
                   });
 
+                  // Esperar 100ms para asegurar que el nodo se guarde antes del edge
+                  await new Promise(resolve => setTimeout(resolve, 100));
+
                   // Crear edge
                   const edgeStyle = getEdgeStyle(relationType);
                   
-                  // Mapear tipo a label legible en español
-                  const labelMap: Record<string, string> = {
-                    "1-1": "1‒1",
-                    "1-N": "1‒N",
-                    "N-N": "N‒N",
-                    "ASSOCIATION": "Asociación",
-                    "AGGREGATION": "Agregación",
-                    "COMPOSITION": "Composición",
-                    "INHERITANCE": "Herencia",
-                    "DEPENDENCY": "Dependencia",
-                    "REALIZATION": "Realización"
-                  };
+                  // 🆕 UML 2.5: Obtener multiplicidades
+                  const multiplicities = getMultiplicitiesFromRelationType(relationType);
                   
                   const newEdge: Edge = {
                     id: `edge-${Date.now()}`,
                     source: pkTable.id,
                     target: fkTable.id,
-                    label: labelMap[relationType] || relationType,
+                    type: "umlMultiplicity", // 🆕 Usar edge personalizado
                     animated: edgeStyle.animated,
                     style: {
                       stroke: edgeStyle.stroke,
@@ -1559,14 +1448,6 @@ export default function DiagramEditor() {
                       // Agregar markerEnd desde el style si existe (para UML markers personalizados)
                       ...(edgeStyle.style || {})
                     },
-                    type: edgeStyle.type,
-                    labelStyle: {
-                      fill: edgeStyle.stroke,
-                      fontWeight: 700,
-                      fontSize: 13,
-                      textShadow: "0 1px 3px rgba(0,0,0,0.8)"
-                    },
-                    labelBgStyle: edgeStyle.labelBgStyle,
                     markerEnd: typeof edgeStyle.markerEnd === 'object' ? {
                       type: (edgeStyle.markerEnd as any).type,
                       color: (edgeStyle.markerEnd as any).color,
@@ -1577,6 +1458,8 @@ export default function DiagramEditor() {
                       sourceField: pkField?.name,
                       targetField: fkField?.name,
                       relationType,
+                      sourceMultiplicity: multiplicities.sourceMultiplicity,
+                      targetMultiplicity: multiplicities.targetMultiplicity,
                       ...(action.onDelete && { onDelete: action.onDelete }),
                       ...(action.onUpdate && { onUpdate: action.onUpdate }),
                     },
@@ -1589,10 +1472,11 @@ export default function DiagramEditor() {
                     action: "ADD_EDGE",
                     payload: newEdge,
                   });
+                  
+                  console.log(`✅ [AI] Created ${relationType} relation with FK: ${pkTable.data.name} → ${fkTable.data.name}.${fkField.name}`);
                 }
               }
 
-              console.log(`✅ [AI] Created relation: ${action.fromTable} → ${action.toTable}`);
               break;
             }
 
@@ -1606,7 +1490,6 @@ export default function DiagramEditor() {
               if (nodeToDelete) {
                 updatedNodes = updatedNodes.filter((n) => n.id !== nodeToDelete.id);
                 handleDeleteNode(nodeToDelete.id);
-                console.log(`✅ [AI] Deleted table: ${action.name}`);
               }
               break;
             }
@@ -1640,9 +1523,6 @@ export default function DiagramEditor() {
                     payload: { edgeId: edgeToDelete.id },
                   });
 
-                  console.log(`✅ [AI] Deleted relation: ${action.fromTable} ↔ ${action.toTable}`);
-                } else {
-                  console.warn(`⚠️ [AI] Relation not found: ${action.fromTable} ↔ ${action.toTable}`);
                 }
               }
               break;
@@ -1669,8 +1549,6 @@ export default function DiagramEditor() {
                 );
 
                 handleNodeUpdate(targetNode.id, { fields: updatedFields });
-                
-                console.log(`✅ [AI] Deleted ${action.fieldNames.length} field(s) from ${action.tableName}: ${action.fieldNames.join(", ")}`);
               }
               break;
             }
@@ -1697,8 +1575,6 @@ export default function DiagramEditor() {
                 );
 
                 handleNodeUpdate(targetNode.id, { fields: updatedFields });
-                
-                console.log(`✅ [AI] Renamed field in ${action.tableName}: ${action.oldFieldName} → ${action.newFieldName}`);
               }
               break;
             }
@@ -1731,13 +1607,6 @@ export default function DiagramEditor() {
                 );
 
                 handleNodeUpdate(targetNode.id, { fields: updatedFields });
-                
-                const changes = [];
-                if (action.newType) changes.push(`type→${action.newType}`);
-                if (action.nullable !== undefined) changes.push(`nullable→${action.nullable}`);
-                if (action.isPrimary !== undefined) changes.push(`isPrimary→${action.isPrimary}`);
-                
-                console.log(`✅ [AI] Modified field ${action.fieldName} in ${action.tableName}: ${changes.join(", ")}`);
               }
               break;
             }
@@ -1818,17 +1687,13 @@ export default function DiagramEditor() {
                     action: "UPDATE_EDGE",
                     payload: modifiedEdge,
                   });
-
-                  console.log(`✅ [AI] Modified relation: ${action.fromTable} ↔ ${action.toTable} → ${newRelationType}`);
-                } else {
-                  console.warn(`⚠️ [AI] Relation not found to modify: ${action.fromTable} ↔ ${action.toTable}`);
                 }
               }
               break;
             }
 
             default:
-              console.warn("⚠️ [AI] Unknown action type:", action.type);
+              console.warn("⚠️ Acción desconocida:", action.type);
           }
 
           // Delay pequeño entre acciones para evitar condiciones de carrera
@@ -1910,6 +1775,12 @@ export default function DiagramEditor() {
             type: f.type,
             isPrimary: f.isPrimary || false,
             nullable: f.nullable !== false,
+            isForeign: f.isForeign || false,
+            references: f.references,
+            referencesField: f.referencesField,
+            relationType: f.relationType,
+            onDelete: f.onDelete,
+            onUpdate: f.onUpdate,
           }));
 
           const updatedFields = [...targetNode.data.fields, ...newFields];
@@ -1927,6 +1798,48 @@ export default function DiagramEditor() {
           console.log(
             `✅ [AI] Added ${newFields.length} deferred field(s) to ${tableName}: ${newFields.map((f: any) => f.name).join(", ")}`
           );
+
+          // 🆕 Crear edges automáticamente para nuevos campos FK con references + referencesField
+          const fkFields = newFields.filter((f: any) => f.isForeign && f.references && f.referencesField);
+          for (const fkField of fkFields) {
+            const referencedNode = updatedNodes.find((n) => 
+              n.data.name?.toLowerCase() === fkField.references?.toLowerCase() || 
+              n.data.label?.toLowerCase() === fkField.references?.toLowerCase()
+            );
+
+            if (referencedNode) {
+              const edgeStyle = getEdgeStyle(fkField.relationType || "ASSOCIATION");
+              const multiplicities = getMultiplicitiesFromRelationType(fkField.relationType || "ASSOCIATION");
+
+              const newEdge: Edge = {
+                id: `edge-${Date.now()}-${Math.random()}`,
+                source: referencedNode.id,
+                target: targetNode.id,
+                type: "uml-multiplicity",
+                data: {
+                  relationType: fkField.relationType || "ASSOCIATION",
+                  sourceField: fkField.referencesField,
+                  targetField: fkField.name,
+                  sourceMultiplicity: multiplicities.source,
+                  targetMultiplicity: multiplicities.target,
+                  onDelete: fkField.onDelete,
+                  onUpdate: fkField.onUpdate,
+                },
+                ...edgeStyle,
+              };
+
+              updatedEdges = [...updatedEdges, newEdge];
+              setEdges((eds: Edge[]) => [...eds, newEdge]);
+
+              socket.emit("diagram-change", {
+                projectId: project.id,
+                action: "ADD_EDGE",
+                payload: newEdge,
+              });
+
+              console.log(`✅ [AI] Auto-created edge for FK: ${referencedNode.data.name}.${fkField.referencesField} → ${tableName}.${fkField.name}`);
+            }
+          }
 
           await new Promise((resolve) => setTimeout(resolve, 100));
         } catch (error) {
@@ -2167,6 +2080,7 @@ export default function DiagramEditor() {
         <div style={{ flex: 1, height: "100%", overflow: "hidden" }}>
           <ReactFlow
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             nodes={nodes}
             edges={edges}
             onNodesChange={isViewer ? undefined : handleNodesChange}

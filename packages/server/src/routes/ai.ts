@@ -70,9 +70,29 @@ router.post("/parse-intent", async (req, res) => {
       });
     }
 
+    // 📊 Log de acciones antes de limpiar
+    console.log("[AI Route] Actions before cleaning:");
+    result.actions.forEach((action: any, i: number) => {
+      if (action.type === "CreateRelation") {
+        console.log(`  ${i}. CreateRelation: ${action.fromTable} -> ${action.toTable} (cardinality: ${action.cardinality || 'none'}, relationType: ${action.relationType || 'none'})`);
+      } else {
+        console.log(`  ${i}. ${action.type}: ${action.name || action.tableName || 'N/A'}`);
+      }
+    });
+
     // 🧹 Limpiar duplicados y normalizar tablas intermedias
     let cleanedActions = cleanDuplicateFKs(result.actions);
     cleanedActions = normalizeIntermediateTables(cleanedActions);
+
+    // 📊 Log de acciones después de limpiar
+    console.log("[AI Route] Actions after cleaning:");
+    cleanedActions.forEach((action: any, i: number) => {
+      if (action.type === "CreateRelation") {
+        console.log(`  ${i}. CreateRelation: ${action.fromTable} -> ${action.toTable} (cardinality: ${action.cardinality || 'none'}, relationType: ${action.relationType || 'none'})`);
+      } else {
+        console.log(`  ${i}. ${action.type}: ${action.name || action.tableName || 'N/A'}`);
+      }
+    });
 
     console.log(
       `[AI Route] Successfully parsed and cleaned ${cleanedActions.length} action(s)`

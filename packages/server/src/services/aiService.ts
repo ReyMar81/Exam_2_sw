@@ -78,6 +78,12 @@ export interface AIField {
   type: string;
   isPrimary?: boolean;
   nullable?: boolean;
+  isForeign?: boolean;
+  references?: string;
+  referencesField?: string;
+  relationType?: "ASSOCIATION" | "AGGREGATION" | "COMPOSITION" | "INHERITANCE" | "DEPENDENCY" | "REALIZATION";
+  onDelete?: "CASCADE" | "SET NULL" | "RESTRICT" | "NO ACTION";
+  onUpdate?: "CASCADE" | "SET NULL" | "RESTRICT" | "NO ACTION";
 }
 
 /**
@@ -95,15 +101,31 @@ ACCIONES DISPONIBLES:
 
 1. CreateTable: Crear una nueva tabla con campos
    - Incluye SIEMPRE un campo "id" con type "SERIAL" e isPrimary: true (a menos que el usuario especifique otra PK)
-   - Tipos SQL comunes: INT, SERIAL, VARCHAR(n), TEXT, BOOLEAN, DATE, TIMESTAMP, DECIMAL(p,s), BIGINT
-   - IMPORTANTE: Las claves foráneas (campos que terminan en _id) deben ser de tipo INT, NO SERIAL
-   - Solo el campo "id" principal debe ser SERIAL con isPrimary: true
+   - Tipos SQL comunes: INT, SERIAL, VARCHAR(n), TEXT, BOOLEAN, DATE, TIMESTAMP, TIMESTAMPTZ, DECIMAL(p,s), BIGINT, BIGSERIAL, NUMERIC, JSON, JSONB, UUID
+   - ⚠️ CRÍTICO: Las claves foráneas (campos que terminan en _id) SIEMPRE deben ser tipo INT, NUNCA SERIAL
+   - ⚠️ CRÍTICO: Solo el campo "id" principal (PK) debe ser SERIAL con isPrimary: true
+   - ⚠️ Si un campo tiene "isForeign": true, su tipo DEBE ser "INT" obligatoriamente
+   - Propiedades opcionales de campos:
+     * "nullable": true/false (por defecto true, excepto si es PK que es false)
+     * "isPrimary": true/false (marca campo como llave primaria)
+     * "isForeign": true/false (marca campo como llave foránea)
+     * "references": "nombre_tabla" (solo si isForeign es true)
+     * "referencesField": "nombre_campo" (campo PK específico de la tabla referenciada, ej: "id", "codigo", "dni")
+     * "relationType": tipo de relación UML (solo si isForeign es true)
+     * "onDelete": "CASCADE"/"SET NULL"/"RESTRICT"/"NO ACTION"
+     * "onUpdate": "CASCADE"/"SET NULL"/"RESTRICT"/"NO ACTION"
 
 2. CreateRelation: Crear relación entre dos tablas existentes
    - IMPORTANTE: Usa "relationType" para tipos UML 2.5, NO uses "cardinality" para ellos
    - Campo "cardinality": Solo para cardinalidades clásicas ("ONE_TO_ONE", "ONE_TO_MANY", "MANY_TO_MANY")
    - Campo "relationType": Para tipos UML 2.5 ("ASSOCIATION", "AGGREGATION", "COMPOSITION", "INHERITANCE", "DEPENDENCY", "REALIZATION")
    - Propiedades CASCADE: "onDelete" y "onUpdate" (valores: "CASCADE", "SET NULL", "RESTRICT", "NO ACTION")
+   
+   ⚠️ REGLA CRÍTICA PARA HERENCIA:
+   Si el usuario dice "hereda", "extiende", "es un/una", "herencia", "tipo de", "especialización":
+   → SIEMPRE crear CreateRelation con "relationType": "INHERITANCE"
+   → fromTable = tabla hija/subclase (la que hereda)
+   → toTable = tabla padre/superclase (de quien hereda)
    
    TIPOS DE RELACIONES UML 2.5 (usar "relationType", NO "cardinality"):
    - INHERITANCE: Para relaciones "es un" (herencia, extiende, generalización, subclase, superclase)
@@ -180,32 +202,35 @@ EJEMPLOS DE DIAGRAMAS COMPLETOS:
 📦 Sistema de Inventario con Sucursales:
 - sucursal (id, nombre, direccion, telefono, activa)
 - categoria (id, nombre, descripcion)
-- producto (id, nombre, precio, stock_minimo, categoria_id)
-- inventario (id, producto_id, sucursal_id, cantidad, fecha_actualizacion)
-- movimiento (id, producto_id, sucursal_id, tipo, cantidad, fecha, usuario)
+- producto (id, nombre, precio, stock_minimo)
+- inventario (id, cantidad, fecha_actualizacion)
+- movimiento (id, tipo, cantidad, fecha, usuario)
 Relaciones: categoria 1:N producto, producto 1:N inventario, sucursal 1:N inventario, producto 1:N movimiento
 
 🏥 Sistema de Gestión Hospitalaria:
 - paciente (id, nombre, fecha_nacimiento, telefono, email)
 - medico (id, nombre, especialidad, telefono)
-- cita (id, paciente_id, medico_id, fecha_hora, motivo, estado)
-- historial_medico (id, paciente_id, fecha, diagnostico, tratamiento)
+- cita (id, fecha_hora, motivo, estado)
+- historial_medico (id, fecha, diagnostico, tratamiento)
 - medicamento (id, nombre, descripcion, precio)
-- receta (id, cita_id, medicamento_id, dosis, duracion_dias)
+- receta (id, dosis, duracion_dias)
+Relaciones: paciente 1:N cita, medico 1:N cita, paciente 1:N historial_medico, cita 1:N receta, medicamento 1:N receta
 
 🎓 Sistema de Gestión Académica:
 - estudiante (id, nombre, email, fecha_ingreso, carrera)
 - profesor (id, nombre, especialidad, email)
-- curso (id, nombre, codigo, creditos, profesor_id)
-- inscripcion (id, estudiante_id, curso_id, semestre, nota_final)
-- asistencia (id, inscripcion_id, fecha, presente)
+- curso (id, nombre, codigo, creditos)
+- inscripcion (id, semestre, nota_final)
+- asistencia (id, fecha, presente)
+Relaciones: profesor 1:N curso, estudiante N:N curso (genera inscripcion), inscripcion 1:N asistencia
 
 🏪 Sistema de Ventas:
 - cliente (id, nombre, email, telefono, direccion)
 - categoria (id, nombre, descripcion)
-- producto (id, nombre, precio, stock, categoria_id)
-- venta (id, cliente_id, fecha, total, estado)
-- detalle_venta (id, venta_id, producto_id, cantidad, precio_unitario)
+- producto (id, nombre, precio, stock)
+- venta (id, fecha, total, estado)
+- detalle_venta (id, cantidad, precio_unitario)
+Relaciones: cliente 1:N venta, venta 1:N detalle_venta, producto 1:N detalle_venta, categoria 1:N producto
 
 REGLAS PARA DIAGRAMAS COMPLETOS:
 1. Siempre incluye campos de auditoría (created_at, updated_at) cuando sea apropiado
@@ -213,10 +238,11 @@ REGLAS PARA DIAGRAMAS COMPLETOS:
 3. Incluye al menos 2 relaciones ONE_TO_MANY
 4. Si tiene sentido, agrega 1 relación MANY_TO_MANY
 5. Todos los nombres en snake_case y en minúsculas
-6. IDs como SERIAL y PKs, FKs como INT
-7. Campos de texto corto VARCHAR(100-255), texto largo TEXT
-8. Precios y cantidades como DECIMAL(10,2)
-9. Fechas como DATE, timestamps como TIMESTAMP
+6. ⚠️ CRÍTICO: NO incluyas campos FK (_id) en CreateTable, usa SOLO CreateRelation
+7. IDs como SERIAL y PKs solamente (sin FKs en CreateTable)
+8. Campos de texto corto VARCHAR(100-255), texto largo TEXT
+9. Precios y cantidades como DECIMAL(10,2)
+10. Fechas como DATE, timestamps como TIMESTAMP
 
 REGLAS DE INFERENCIA:
 - Nombres en snake_case (ej: "nombre_completo", "fecha_nacimiento")
@@ -239,11 +265,148 @@ REGLAS DE INFERENCIA:
   * "asociación entre X y Y" → ASSOCIATION
   * "dependencia de A hacia B" → DEPENDENCY
   * "realización de interfaz I por clase C" → REALIZATION
+  
+RECONOCIMIENTO DE PATRONES PARA RELACIONES UML:
+  * Palabras clave para HERENCIA: "hereda", "hereda de", "extiende", "es un", "es una", "herencia", "generalización", "subclase", "superclase", "relación de herencia", "usando herencia", "tipo de", "especialización"
+  * Palabras clave para COMPOSICIÓN: "composición", "parte de", "contiene", "compuesto por", "no existe sin", "eliminar en cascada"
+  * Palabras clave para AGREGACIÓN: "agregación", "tiene", "incluye", "agregado de", "puede existir sin", "opcional"
+  * Palabras clave para ASOCIACIÓN: "asociación", "asocia", "relaciona", "vincula", "conecta"
+  * Palabras clave para DEPENDENCIA: "dependencia", "depende de", "usa", "utiliza"
+  * Palabras clave para REALIZACIÓN: "realización", "implementa", "realiza", "interfaz"
 - Si el usuario dice "1 a N", "1:N", "uno a muchos" → ONE_TO_MANY
 - Si el usuario dice "N a M", "N:M", "muchos a muchos" → MANY_TO_MANY
 - Si el usuario dice "1 a 1", "1:1", "uno a uno" → ONE_TO_ONE
 - Si el usuario menciona "en cascada", "eliminar hijos", "parte de" → COMPOSITION con CASCADE
 - Si el usuario menciona "opcional", "independiente", "agregado" → AGGREGATION con SET NULL
+
+🎯 EJEMPLOS ESPECÍFICOS DE RELACIONES UML 2.5:
+
+Entrada: "Crea una herencia de empleado a persona"
+Salida:
+{
+  "actions": [{
+    "type": "CreateRelation",
+    "fromTable": "empleado",
+    "toTable": "persona",
+    "relationType": "INHERITANCE"
+  }]
+}
+
+Entrada: "Empleado hereda de persona"
+Salida:
+{
+  "actions": [{
+    "type": "CreateRelation",
+    "fromTable": "empleado",
+    "toTable": "persona",
+    "relationType": "INHERITANCE"
+  }]
+}
+
+Entrada: "Gerente es un empleado"
+Salida:
+{
+  "actions": [{
+    "type": "CreateRelation",
+    "fromTable": "gerente",
+    "toTable": "empleado",
+    "relationType": "INHERITANCE"
+  }]
+}
+
+Entrada: "Estudiante extiende persona"
+Salida:
+{
+  "actions": [{
+    "type": "CreateRelation",
+    "fromTable": "estudiante",
+    "toTable": "persona",
+    "relationType": "INHERITANCE"
+  }]
+}
+
+Entrada: "Crea relación de herencia entre cliente_premium y cliente"
+Salida:
+{
+  "actions": [{
+    "type": "CreateRelation",
+    "fromTable": "cliente_premium",
+    "toTable": "cliente",
+    "relationType": "INHERITANCE"
+  }]
+}
+
+Entrada: "Relaciona auto con vehiculo usando herencia"
+Salida:
+{
+  "actions": [{
+    "type": "CreateRelation",
+    "fromTable": "auto",
+    "toTable": "vehiculo",
+    "relationType": "INHERITANCE"
+  }]
+}
+
+Entrada: "Habitación tiene composición con casa"
+Salida:
+{
+  "actions": [{
+    "type": "CreateRelation",
+    "fromTable": "habitacion",
+    "toTable": "casa",
+    "relationType": "COMPOSITION",
+    "onDelete": "CASCADE",
+    "onUpdate": "CASCADE"
+  }]
+}
+
+Entrada: "Profesor tiene agregación con departamento"
+Salida:
+{
+  "actions": [{
+    "type": "CreateRelation",
+    "fromTable": "profesor",
+    "toTable": "departamento",
+    "relationType": "AGGREGATION",
+    "onDelete": "SET NULL",
+    "onUpdate": "NO ACTION"
+  }]
+}
+
+Entrada: "Asociación entre pedido y cliente"
+Salida:
+{
+  "actions": [{
+    "type": "CreateRelation",
+    "fromTable": "pedido",
+    "toTable": "cliente",
+    "relationType": "ASSOCIATION",
+    "onDelete": "RESTRICT",
+    "onUpdate": "NO ACTION"
+  }]
+}
+
+Entrada: "Crea dependencia de factura hacia configuracion"
+Salida:
+{
+  "actions": [{
+    "type": "CreateRelation",
+    "fromTable": "factura",
+    "toTable": "configuracion",
+    "relationType": "DEPENDENCY"
+  }]
+}
+
+Entrada: "Realización de interfaz_pago por clase tarjeta"
+Salida:
+{
+  "actions": [{
+    "type": "CreateRelation",
+    "fromTable": "tarjeta",
+    "toTable": "interfaz_pago",
+    "relationType": "REALIZATION"
+  }]
+}
 
 EJEMPLOS DE COMPORTAMIENTO CORRECTO:
 
@@ -314,9 +477,24 @@ Salida:
     "type": "CreateTable",
     "name": "persona",
     "fields": [
-      { "name": "id", "type": "SERIAL", "isPrimary": true },
-      { "name": "nombre", "type": "VARCHAR(100)" },
-      { "name": "edad", "type": "INT" }
+      { "name": "id", "type": "SERIAL", "isPrimary": true, "nullable": false },
+      { "name": "nombre", "type": "VARCHAR(100)", "nullable": false },
+      { "name": "edad", "type": "INT", "nullable": true }
+    ]
+  }]
+}
+
+Entrada: "Crea tabla producto con id, nombre requerido, descripcion opcional, precio no nullable"
+Salida:
+{
+  "actions": [{
+    "type": "CreateTable",
+    "name": "producto",
+    "fields": [
+      { "name": "id", "type": "SERIAL", "isPrimary": true, "nullable": false },
+      { "name": "nombre", "type": "VARCHAR(150)", "nullable": false },
+      { "name": "descripcion", "type": "TEXT", "nullable": true },
+      { "name": "precio", "type": "DECIMAL(10,2)", "nullable": false }
     ]
   }]
 }
@@ -352,8 +530,7 @@ Salida:
         { "name": "id", "type": "SERIAL", "isPrimary": true },
         { "name": "nombre", "type": "VARCHAR(150)" },
         { "name": "precio", "type": "DECIMAL(10,2)" },
-        { "name": "stock_minimo", "type": "INT" },
-        { "name": "categoria_id", "type": "INT", "isForeign": true }
+        { "name": "stock_minimo", "type": "INT" }
       ]
     },
     {
@@ -361,8 +538,6 @@ Salida:
       "name": "inventario",
       "fields": [
         { "name": "id", "type": "SERIAL", "isPrimary": true },
-        { "name": "producto_id", "type": "INT", "isForeign": true },
-        { "name": "sucursal_id", "type": "INT", "isForeign": true },
         { "name": "cantidad", "type": "INT" },
         { "name": "fecha_actualizacion", "type": "TIMESTAMP" }
       ]
@@ -372,8 +547,6 @@ Salida:
       "name": "movimiento",
       "fields": [
         { "name": "id", "type": "SERIAL", "isPrimary": true },
-        { "name": "producto_id", "type": "INT", "isForeign": true },
-        { "name": "sucursal_id", "type": "INT", "isForeign": true },
         { "name": "tipo", "type": "VARCHAR(20)" },
         { "name": "cantidad", "type": "INT" },
         { "name": "fecha", "type": "TIMESTAMP" },
@@ -418,7 +591,6 @@ Salida:
       "name": "venta",
       "fields": [
         { "name": "id", "type": "SERIAL", "isPrimary": true },
-        { "name": "cliente_id", "type": "INT", "isForeign": true },
         { "name": "fecha", "type": "TIMESTAMP" },
         { "name": "total", "type": "DECIMAL(10,2)" },
         { "name": "estado", "type": "VARCHAR(20)" }
@@ -429,8 +601,6 @@ Salida:
       "name": "detalle_venta",
       "fields": [
         { "name": "id", "type": "SERIAL", "isPrimary": true },
-        { "name": "venta_id", "type": "INT", "isForeign": true },
-        { "name": "producto_id", "type": "INT", "isForeign": true },
         { "name": "cantidad", "type": "INT" },
         { "name": "precio_unitario", "type": "DECIMAL(10,2)" }
       ]
@@ -441,10 +611,20 @@ Salida:
   ]
 }
 
-IMPORTANTE SOBRE TIPOS:
-- Solo el campo "id" (PK) debe ser SERIAL con isPrimary: true
-- Todas las FKs (usuario_id, libro_id, categoria_id, etc.) deben ser INT
-- NO uses SERIAL para campos que no sean la llave primaria principal
+⚠️ IMPORTANTE SOBRE TIPOS (CRÍTICO):
+- ✅ Solo el campo "id" (PK principal) debe ser SERIAL con isPrimary: true
+- ✅ TODAS las FKs (usuario_id, libro_id, categoria_id, profesor_id, etc.) SIEMPRE deben ser INT
+- ❌ NUNCA uses SERIAL para campos que no sean la PK principal
+- ❌ SERIAL en FKs genera errores SQL graves
+
+Ejemplos CORRECTOS de FKs:
+  { "name": "profesor_id", "type": "INT", "isForeign": true }  ✅
+  { "name": "estudiante_id", "type": "INT", "isForeign": true }  ✅
+  { "name": "curso_id", "type": "INT", "isForeign": true }  ✅
+
+Ejemplos INCORRECTOS (NO HACER):
+  { "name": "profesor_id", "type": "SERIAL", "isForeign": true }  ❌
+  { "name": "estudiante_id", "type": "SERIAL" }  ❌
 
 Entrada: "Relación 1 a muchos entre cliente y pedido"
 Salida:
@@ -467,6 +647,83 @@ Salida:
   }]
 }
 
+Entrada: "Agrega campo email nullable y activo no nullable a usuario"
+Salida:
+{
+  "actions": [{
+    "type": "AddField",
+    "tableName": "usuario",
+    "fields": [
+      { "name": "email", "type": "VARCHAR(100)", "nullable": true },
+      { "name": "activo", "type": "BOOLEAN", "nullable": false }
+    ]
+  }]
+}
+
+Entrada: "Crea FK empresa_id en empleado que referencia al campo codigo de empresa"
+Salida:
+{
+  "actions": [{
+    "type": "AddField",
+    "tableName": "empleado",
+    "field": {
+      "name": "empresa_id",
+      "type": "INT",
+      "isForeign": true,
+      "references": "empresa",
+      "referencesField": "codigo",
+      "relationType": "ASSOCIATION",
+      "onDelete": "CASCADE"
+    }
+  }]
+}
+
+Entrada: "Marca el campo email de usuario como nullable"
+Salida:
+{
+  "actions": [{
+    "type": "ModifyField",
+    "tableName": "usuario",
+    "fieldName": "email",
+    "nullable": true
+  }]
+}
+
+Entrada: "Cambia el tipo de precio a DECIMAL(12,2) y hazlo no nullable"
+Salida:
+{
+  "actions": [{
+    "type": "ModifyField",
+    "tableName": "producto",
+    "fieldName": "precio",
+    "newType": "DECIMAL(12,2)",
+    "nullable": false
+  }]
+}
+
+Entrada: "Cambia la relación entre orden y cliente a COMPOSITION con CASCADE"
+Salida:
+{
+  "actions": [{
+    "type": "ModifyRelation",
+    "fromTable": "cliente",
+    "toTable": "orden",
+    "relationType": "COMPOSITION",
+    "onDelete": "CASCADE",
+    "onUpdate": "CASCADE"
+  }]
+}
+
+Entrada: "Elimina los campos temporal y antiguo_id de usuario"
+Salida:
+{
+  "actions": [{
+    "type": "DeleteField",
+    "tableName": "usuario",
+    "fieldNames": ["temporal", "antiguo_id"]
+  }]
+}
+
 Entrada: "Elimina tabla temporal"
 Salida:
 {
@@ -482,6 +739,89 @@ IMPORTANTE:
 - Si pide eliminar relaciones, usa DeleteRelation con los nombres de las tablas.
 - Asegúrate de que el JSON sea estrictamente válido.
 - Responde ÚNICAMENTE con JSON válido, sin texto adicional antes o después.`;
+
+/**
+ * 🛡️ Sanitiza y corrige errores comunes en las respuestas de la IA
+ * - Corrige FKs con tipo SERIAL -> INT
+ * - Detecta campos FK por nombre (_id) y tipo SERIAL
+ * - Valida campos obligatorios
+ */
+function sanitizeAIActions(actions: AIAction[]): AIAction[] {
+  return actions.map((action) => {
+    if (action.type === "CreateTable") {
+      return {
+        ...action,
+        fields: action.fields.map((field: AIField) => {
+          const fieldName = field.name.toLowerCase();
+          const isLikelyFK = fieldName.endsWith('_id') && fieldName !== 'id';
+          const hasSerialType = field.type.toUpperCase().includes("SERIAL");
+          
+          // 🔧 Caso 1: Campo marcado explícitamente como FK con tipo SERIAL
+          if (field.isForeign && hasSerialType) {
+            console.warn(
+              `⚠️ [Sanitizer] Correcting FK type from ${field.type} to INT for field: ${field.name}`
+            );
+            return { ...field, type: "INT" };
+          }
+          
+          // 🔧 Caso 2: Campo que parece FK por nombre (termina en _id) con tipo SERIAL
+          if (isLikelyFK && hasSerialType) {
+            console.warn(
+              `⚠️ [Sanitizer] Detected FK-like field with SERIAL type, correcting to INT: ${field.name}`
+            );
+            return { ...field, type: "INT" };
+          }
+          
+          return field;
+        }),
+      };
+    }
+
+    if (action.type === "AddField") {
+      const field = action.field;
+      const fields = action.fields;
+
+      // Sanitizar field único
+      if (field) {
+        const fieldName = field.name?.toLowerCase() || '';
+        const isLikelyFK = fieldName.endsWith('_id') && fieldName !== 'id';
+        const hasSerialType = field.type?.toUpperCase().includes("SERIAL");
+        
+        if ((field.isForeign || isLikelyFK) && hasSerialType) {
+          console.warn(
+            `⚠️ [Sanitizer] Correcting FK type from ${field.type} to INT for field: ${field.name}`
+          );
+          return {
+            ...action,
+            field: { ...field, type: "INT" },
+          };
+        }
+      }
+
+      // Sanitizar múltiples fields
+      if (fields && Array.isArray(fields)) {
+        return {
+          ...action,
+          fields: fields.map((f: AIField) => {
+            const fieldName = f.name?.toLowerCase() || '';
+            const isLikelyFK = fieldName.endsWith('_id') && fieldName !== 'id';
+            const hasSerialType = f.type?.toUpperCase().includes("SERIAL");
+            
+            if ((f.isForeign || isLikelyFK) && hasSerialType) {
+              console.warn(
+                `⚠️ [Sanitizer] Correcting FK type from ${f.type} to INT for field: ${f.name}`
+              );
+              return { ...f, type: "INT" };
+            }
+            return f;
+          }),
+        };
+      }
+    }
+
+    return action;
+  });
+}
 
 /**
  * Parsea un prompt del usuario y devuelve acciones estructuradas
@@ -524,7 +864,10 @@ export async function parseUserIntent(
       `✅ [AI] Successfully parsed ${parsed.actions.length} action(s) in ${duration}ms`
     );
 
-    return { actions: parsed.actions };
+    // 🛡️ Sanitizar acciones para corregir errores comunes de la IA
+    const sanitizedActions = sanitizeAIActions(parsed.actions);
+
+    return { actions: sanitizedActions };
   } catch (error: any) {
     console.error("❌ [AI] OpenAI API error:", error);
 
@@ -547,67 +890,134 @@ export async function parseUserIntent(
  */
 const IMAGE_SYSTEM_PROMPT = `Eres un modelo de IA experto en analizar diagramas Entidad-Relación (ER) y diagramas UML 2.5 desde imágenes.
 
+🎯 OBJETIVO: Recrear el diagrama EXACTAMENTE como aparece en la imagen, sin agregar ni omitir nada.
+
+⚠️ REGLAS CRÍTICAS - LEE ESTO PRIMERO:
+1. SOLO crea lo que VES explícitamente en la imagen
+2. NO inventes relaciones que no existen visualmente
+3. NO agregues campos FK automáticamente si no están en el diagrama
+4. Si una línea/flecha no es clara, OMÍTELA (mejor omitir que inventar)
+5. Prioriza EXACTITUD sobre completitud
+
 TAREA:
-- Identificar TODAS las tablas/entidades visibles en el diagrama
-- Extraer TODOS los campos de cada tabla con sus tipos de datos (incluidos los campos FK)
-- Detectar TODAS las relaciones entre tablas (líneas, flechas, conectores)
-- Identificar el tipo de relación según la notación visual (UML, Crow's Foot, Chen, etc.)
-- Generar un diagrama COMPLETO y funcional listo para usar
+- Identificar TODAS las tablas/entidades visibles
+- Extraer TODOS los campos mostrados en cada tabla (solo los visibles)
+- Detectar SOLO las relaciones que tienen líneas/flechas visibles
+- Identificar el tipo de relación según la notación visual UML 2.5
 - Devolver un JSON con acciones estructuradas
 
-REGLAS GENERALES:
-- Siempre devuelves un JSON válido con la propiedad "actions" (array de objetos)
-- Cada acción tiene un campo "type" con valores: CreateTable, CreateRelation
-- Usa nombres en minúsculas y snake_case (ej: "nombre_completo", "fecha_nacimiento")
-- Si no detectas datos en la imagen, devuelve { "actions": [] }
-- IMPORTANTE: Genera el diagrama COMPLETO, no omitas campos ni relaciones
+FORMATO DE RESPUESTA:
+{
+  "actions": [
+    { "type": "CreateTable", ... },
+    { "type": "CreateRelation", ... }
+  ]
+}
 
-ACCIONES DISPONIBLES:
+═══════════════════════════════════════════════════════════════
+📋 ACCIÓN 1: CreateTable (Crear tabla con campos)
+═══════════════════════════════════════════════════════════════
 
-1. CreateTable: Crear tabla con campos
-   - SIEMPRE incluye campo "id" con type "SERIAL" e isPrimary: true (a menos que el diagrama muestre otra PK)
-   - Tipos SQL comunes: INT, SERIAL, VARCHAR(100), TEXT, BOOLEAN, DATE, TIMESTAMP, DECIMAL(10,2), BIGINT
-   - IMPORTANTE: Las claves foráneas (campos *_id) deben ser INT, NO SERIAL
-   - Solo el campo "id" principal debe ser SERIAL con isPrimary: true
-   - Extrae TODOS los campos visibles, incluyendo FKs
+SOLO incluye campos que aparezcan EXPLÍCITAMENTE en la imagen:
+- Si ves "id", "ID", "pk" → { "name": "id", "type": "SERIAL", "isPrimary": true }
+- Si ves "*_id", "*_fk" → { "name": "..._id", "type": "INT", "isForeign": true }
+- Si NO ves un campo "id" en la tabla, NO lo agregues automáticamente
 
-2. CreateRelation: Crear relación entre tablas
-   - IMPORTANTE: Usa "cardinality" para cardinalidades clásicas, "relationType" para tipos UML 2.5
-   - Campo "cardinality": Solo para cardinalidades clásicas ("ONE_TO_ONE", "ONE_TO_MANY", "MANY_TO_MANY")
-   - Campo "relationType": Para tipos UML 2.5 ("ASSOCIATION", "AGGREGATION", "COMPOSITION", "INHERITANCE", "DEPENDENCY", "REALIZATION")
-   - Propiedades CASCADE: "onDelete" y "onUpdate" (valores: "CASCADE", "SET NULL", "RESTRICT", "NO ACTION")
-   
-   DETECTAR TIPO SEGÚN NOTACIÓN VISUAL:
-   * Rombo vacío (◇) → { "relationType": "AGGREGATION", "onDelete": "SET NULL", "onUpdate": "CASCADE" }
-   * Rombo lleno (◆) → { "relationType": "COMPOSITION", "onDelete": "CASCADE", "onUpdate": "CASCADE" }
-   * Flecha vacía cerrada/triangular (▷, △) → { "relationType": "INHERITANCE", "onDelete": "CASCADE", "onUpdate": "CASCADE" }
-   * Línea punteada con flecha (- - >) → { "relationType": "DEPENDENCY" }
-   * Línea punteada con flecha vacía (- - ▷) → { "relationType": "REALIZATION" }
-   * Línea continua simple → { "relationType": "ASSOCIATION" }
-   * Crow's foot (patas de gallo), 1:N, 1 a muchos → { "cardinality": "ONE_TO_MANY" }
-   * Muchos a muchos, N:M, M:N → { "cardinality": "MANY_TO_MANY" }
-   * Uno a uno, 1:1 → { "cardinality": "ONE_TO_ONE" }
-   
-   IMPORTANTE: 
-   - NO uses "cardinality" para tipos UML (INHERITANCE, COMPOSITION, etc.)
-   - Usa "relationType" para INHERITANCE, COMPOSITION, AGGREGATION, ASSOCIATION, DEPENDENCY, REALIZATION
-   - Usa "cardinality" solo para ONE_TO_ONE, ONE_TO_MANY, MANY_TO_MANY
+Tipos SQL según lo que veas:
+- "nombre", "email", "dirección" → VARCHAR(100)
+- "descripción", "comentario" → TEXT
+- "edad", "cantidad", "numero" → INT
+- "precio", "salario" → DECIMAL(10,2)
+- "activo", "habilitado" → BOOLEAN
+- "fecha", "fecha_*" → DATE
+- "created_at", "updated_at" → TIMESTAMP
 
-INFERENCIA DE TIPOS:
-- Si ves "email", "correo" → VARCHAR(100)
-- Si ves "nombre", "apellido" → VARCHAR(100)
-- Si ves "edad", "cantidad" → INT
-- Si ves "precio", "monto" → DECIMAL(10,2)
-- Si ves "descripción", "comentario" → TEXT
-- Si ves "activo", "habilitado" → BOOLEAN
-- Si ves "fecha", "fecha_creacion" → DATE
-- Si ves "created_at", "updated_at" → TIMESTAMP
-- Si ves PK, Primary Key, id → isPrimary: true
+Ejemplo CreateTable:
+{
+  "type": "CreateTable",
+  "name": "persona",
+  "fields": [
+    { "name": "id", "type": "SERIAL", "isPrimary": true },
+    { "name": "nombre", "type": "VARCHAR(100)" },
+    { "name": "email", "type": "VARCHAR(100)" }
+  ]
+}
 
-EJEMPLOS DE RESPUESTA:
+═══════════════════════════════════════════════════════════════
+🔗 ACCIÓN 2: CreateRelation (Crear relación entre tablas)
+═══════════════════════════════════════════════════════════════
 
-Ejemplo 1: Herencia (Empleado hereda de Persona)
-Si ves: Empleado ▷ Persona (flecha triangular apunta a Persona)
+⚠️ PASO 1 - IDENTIFICAR TIPO DE RELACIÓN POR SÍMBOLOS:
+
+🔺 HERENCIA (triángulo vacío):
+   Símbolo: ▷, △, ▶ vacío
+   → { "relationType": "INHERITANCE", "onDelete": "CASCADE" }
+   Dirección: fromTable = hijo (base de flecha), toTable = padre (punta de flecha)
+   Ejemplo visual: Empleado ▷ Persona
+
+◆ COMPOSICIÓN (rombo lleno/negro):
+   Símbolo: ◆, ♦, rombo pintado
+   → { "relationType": "COMPOSITION", "onDelete": "CASCADE" }
+   El rombo está en el contenedor (TODO), FK va en la parte (PARTE)
+   Ejemplo visual: Libro ◆─ Pagina
+
+◇ AGREGACIÓN (rombo vacío):
+   Símbolo: ◇, ◊, rombo sin pintar
+   → { "relationType": "AGGREGATION", "onDelete": "SET NULL" }
+   Similar a composición pero con dependencia más débil
+
+─ ASOCIACIÓN (línea simple continua):
+   Símbolo: Línea recta sin símbolos especiales
+   → { "relationType": "ASSOCIATION" }
+
+- - → DEPENDENCIA (línea punteada con flecha):
+   Símbolo: Línea discontinua/punteada con flecha normal
+   → { "relationType": "DEPENDENCY" }
+
+- - ▷ REALIZACIÓN (línea punteada con flecha triangular):
+   Símbolo: Línea discontinua con triángulo vacío
+   → { "relationType": "REALIZATION" }
+
+⚠️ PASO 2 - SI NO HAY SÍMBOLOS UML, USAR CARDINALIDAD:
+
+Si la línea muestra "1-N", "1:N", "1 a N":
+→ { "cardinality": "ONE_TO_MANY" }
+Ejemplo: Autor ─1-N─ Libro
+
+Si la línea muestra "N-M", "M-N", "N a M":
+→ { "cardinality": "MANY_TO_MANY" }
+Ejemplo: Estudiante ─N-M─ Curso
+
+Si la línea muestra "1-1", "1:1":
+→ { "cardinality": "ONE_TO_ONE" }
+Ejemplo: Usuario ─1-1─ Perfil
+
+⚠️ PRIORIDAD: Símbolos UML > Cardinalidades numéricas
+Si ves ▷ cerca de "1-N", usa INHERITANCE e ignora el "1-N"
+
+⚠️ PASO 3 - DETERMINAR DIRECCIÓN (fromTable → toTable):
+
+Para HERENCIA (▷):
+- fromTable = clase hija (donde inicia la flecha)
+- toTable = clase padre (donde apunta la flecha)
+- Ejemplo: Si Empleado tiene flecha hacia Persona → fromTable: "empleado", toTable: "persona"
+
+Para COMPOSICIÓN/AGREGACIÓN (◆, ◇):
+- fromTable = contenedor (donde está el rombo)
+- toTable = contenido (lo que está siendo contenido)
+- Ejemplo: Si Libro◆ conecta con Pagina → fromTable: "libro", toTable: "pagina"
+
+Para ONE_TO_MANY:
+- fromTable = lado "1" (uno)
+- toTable = lado "N" (muchos)
+- Ejemplo: Si Autor(1)─→Libro(N) → fromTable: "autor", toTable: "libro"
+
+═══════════════════════════════════════════════════════════════
+📖 EJEMPLOS COMPLETOS
+═══════════════════════════════════════════════════════════════
+
+EJEMPLO 1 - Herencia pura (Empleado hereda de Persona):
+Imagen muestra: [Empleado] ▷ [Persona]
 {
   "actions": [
     {
@@ -630,14 +1040,13 @@ Si ves: Empleado ▷ Persona (flecha triangular apunta a Persona)
       "type": "CreateRelation",
       "fromTable": "empleado",
       "toTable": "persona",
-      "relationType": "INHERITANCE",
-      "onDelete": "CASCADE"
+      "relationType": "INHERITANCE"
     }
   ]
 }
 
-Ejemplo 2: Relación 1-N (Un autor escribe muchos libros)
-Si ves: Autor ─(1-N)─ Libro
+EJEMPLO 2 - Relación 1-N clásica:
+Imagen muestra: [Autor] ─1-N→ [Libro] con libro_autor_id visible
 {
   "actions": [
     {
@@ -666,114 +1075,28 @@ Si ves: Autor ─(1-N)─ Libro
   ]
 }
 
-Ejemplo 3: Composición (Libro contiene páginas)
-Si ves: Libro ◆─ Pagina (rombo lleno en Libro)
+═══════════════════════════════════════════════════════════════
+⚠️ RECORDATORIOS FINALES
+═══════════════════════════════════════════════════════════════
+
+✅ SÍ hacer:
+- Examinar cada línea/flecha con cuidado antes de clasificarla
+- Buscar símbolos UML primero (▷, ◆, ◇) antes de cardinalidades
+- Solo crear relaciones con líneas visibles claramente
+- Usar nombres exactos de las tablas como aparecen (normalizar a minúsculas)
+- Copiar solo los campos que aparecen en las cajas/rectángulos
+
+❌ NO hacer:
+- NO inventes campos FK si no están dibujados
+- NO agregues relaciones que no tienen línea visual
+- NO asumas "id" automático si no aparece en la tabla
+- NO confundas símbolos: ▷ ≠ ◆ ≠ ◇
+- NO uses "cardinality" para relaciones UML (INHERITANCE, COMPOSITION, etc.)
+
+🎯 RESPONDE ÚNICAMENTE CON JSON VÁLIDO EN ESTE FORMATO:
 {
-  "actions": [
-    {
-      "type": "CreateTable",
-      "name": "libro",
-      "fields": [
-        { "name": "id", "type": "SERIAL", "isPrimary": true },
-        { "name": "titulo", "type": "VARCHAR(200)" }
-      ]
-    },
-    {
-      "type": "CreateTable",
-      "name": "pagina",
-      "fields": [
-        { "name": "id", "type": "SERIAL", "isPrimary": true },
-        { "name": "numero", "type": "INT" },
-        { "name": "libro_id", "type": "INT", "isForeign": true }
-      ]
-    },
-    {
-      "type": "CreateRelation",
-      "fromTable": "libro",
-      "toTable": "pagina",
-      "relationType": "COMPOSITION",
-      "onDelete": "CASCADE"
-    }
-  ]
-}
-
-REGLAS PARA DIAGRAMAS DIBUJADOS A MANO:
-- Identifica cajas/rectángulos como tablas, incluso si están irregulares
-- El texto en la parte superior de cada caja es el nombre de la tabla
-- Los textos dentro de cada caja son los campos/atributos
-- Las líneas que conectan cajas son relaciones
-
-⚠️ PASO 1 - EXAMINA CADA LÍNEA/FLECHA CUIDADOSAMENTE:
-Antes de decidir el tipo de relación, pregúntate:
-¿Hay una punta de flecha con forma de TRIÁNGULO VACÍO? → SÍ = INHERITANCE
-¿Hay un ROMBO LLENO (negro/pintado) en la línea? → SÍ = COMPOSITION  
-¿Hay un ROMBO VACÍO en la línea? → SÍ = AGGREGATION
-¿Hay texto "1-N" o "1:N" sin símbolos especiales? → SÍ = ONE_TO_MANY
-¿Es solo una línea simple sin símbolos? → Por defecto = ONE_TO_MANY o ASSOCIATION
-
-⚠️ PRIORIDAD MÁXIMA - DETECTAR SÍMBOLOS UML PRIMERO:
-Antes de analizar cardinalidades (1-N, 1-1), BUSCA ESTOS SÍMBOLOS en las flechas/líneas:
-
-1️⃣ FLECHA TRIANGULAR VACÍA (▷, △, ▶ vacío): ES HERENCIA
-   - Usa "relationType": "INHERITANCE"
-   - NO uses "cardinality"
-   - La flecha apunta del hijo al padre
-   - Ejemplo: Si ves Autor con △ apuntando a Persona → Autor hereda de Persona
-
-2️⃣ ROMBO LLENO/NEGRO (◆, ♦, rombo pintado): ES COMPOSICIÓN
-   - Usa "relationType": "COMPOSITION"
-   - NO uses "cardinality"
-   - El rombo está en el contenedor, la FK va en la parte contenida
-   - Ejemplo: Si ves Libro con ◆ conectado a Pagina → Libro contiene Páginas
-
-3️⃣ ROMBO VACÍO (◇, ◊): ES AGREGACIÓN
-   - Usa "relationType": "AGGREGATION"
-   - NO uses "cardinality"
-
-4️⃣ SOLO SI NO HAY SÍMBOLOS UML, entonces mira cardinalidades:
-   - "1-N" o "1:N" → "cardinality": "ONE_TO_MANY"
-   - "N-M" o "M-N" → "cardinality": "MANY_TO_MANY"
-   - "1-1" → "cardinality": "ONE_TO_ONE"
-
-CRÍTICO: Si ves un triángulo o rombo, IGNORA cualquier "1-N" que pueda estar cerca.
-Los símbolos UML tienen prioridad absoluta sobre las cardinalidades numéricas.
-
-CRÍTICO - DIRECCIÓN DE RELACIONES 1-N:
-Para relaciones ONE_TO_MANY, la clave foránea (FK) SIEMPRE va en la tabla del lado "N" (muchos):
-- Si la línea dice "1-N" y conecta TablaA con TablaB:
-  * Identifica cuál tabla está en el lado "1" y cuál en el lado "N"
-  * La FK va en la tabla del lado "N"
-  * Ejemplo: Autor (1) ← → (N) Libro → libro debe tener autor_id
-  * Ejemplo: Editorial (1) ← → (N) Libro → libro debe tener editorial_id
-  
-- Si hay una flecha simple (→) sin rombo:
-  * Asume que la flecha apunta desde el lado "1" hacia el lado "N"
-  * La FK va en la tabla hacia donde apunta la flecha
-  * Ejemplo: Autor → Libro significa autor (1) hacia libro (N) → libro tiene autor_id
-  
-- Para INHERITANCE (▷, △):
-  * La flecha apunta del hijo hacia el padre
-  * El hijo hereda del padre
-  * Ejemplo: Empleado ▷ Persona → empleado hereda de persona
-  * fromTable = tabla hijo (donde está la base de la flecha)
-  * toTable = tabla padre (donde apunta la punta de la flecha)
-
-- Para COMPOSITION (◆):
-  * El rombo está en la tabla contenedora (el "todo")
-  * La FK va en la tabla contenida (la "parte")
-  * Ejemplo: Libro ◆─ Pagina → libro contiene páginas → pagina tiene libro_id
-
-IMPORTANTE:
-- Si la imagen es borrosa o ilegible, haz tu mejor esfuerzo para interpretar
-- DETECTA TODAS las tablas, campos y relaciones visibles - el objetivo es recrear el diagrama COMPLETO
-- Prioriza completitud sobre perfección: mejor incluir algo dudoso que omitirlo
-- Si no estás seguro de un tipo, usa VARCHAR(100) por defecto
-- Solo el campo "id" (PK) debe ser SERIAL, todas las FKs (*_id) deben ser INT
-- Si ves un campo FK pero no hay relación visual, CREA la relación (infiere ONE_TO_MANY)
-- Si ves relaciones sin FKs explícitos, añade el FK automáticamente en CreateTable
-- Para diagramas a mano, sé flexible con la ortografía y nombres irregulares
-- Normaliza nombres a snake_case minúsculas (ej: "Nombre" → "nombre", "Fecha Nacimiento" → "fecha_nacimiento")
-- Responde ÚNICAMENTE con JSON válido`;
+  "actions": [...]
+}`;
 
 /**
  * Parsea una imagen de diagrama ER y devuelve acciones estructuradas
@@ -1062,7 +1385,10 @@ export function normalizeIntermediateTables(actions: AIAction[]): AIAction[] {
   
   actions.forEach((action) => {
     if (action.type === "CreateRelation") {
-      const { fromTable, toTable, cardinality } = action;
+      const { fromTable, toTable, cardinality, relationType } = action;
+      
+      // Relaciones UML con FK físico (NO INHERITANCE, DEPENDENCY, REALIZATION)
+      const umlTypesWithFK = ["COMPOSITION", "AGGREGATION", "ASSOCIATION"];
       
       // En relaciones 1-N, la tabla "to" recibe FK de "from"
       if (cardinality === "ONE_TO_MANY") {
@@ -1070,6 +1396,14 @@ export function normalizeIntermediateTables(actions: AIAction[]): AIAction[] {
           relationFKs.set(toTable.toLowerCase(), new Set());
         }
         relationFKs.get(toTable.toLowerCase())!.add(`${fromTable.toLowerCase()}_id`);
+      }
+      
+      // En relaciones UML con FK, la tabla "from" recibe FK de "to"
+      if (relationType && umlTypesWithFK.includes(relationType)) {
+        if (!relationFKs.has(fromTable.toLowerCase())) {
+          relationFKs.set(fromTable.toLowerCase(), new Set());
+        }
+        relationFKs.get(fromTable.toLowerCase())!.add(`${toTable.toLowerCase()}_id`);
       }
       
       // En relaciones N-N, se crea tabla intermedia con ambos FKs

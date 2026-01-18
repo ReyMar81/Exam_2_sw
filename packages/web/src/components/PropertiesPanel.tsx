@@ -474,6 +474,9 @@ export default function PropertiesPanel({
                       };
                       updateTable("fields", newFields);
 
+                      // Esperar 100ms para asegurar que el nodo se guarde antes del edge
+                      await new Promise(resolve => setTimeout(resolve, 100));
+
                       // Eliminar relaciones FK previas si las había
                       if (setEdges && oldReference) {
                         const filteredEdges = edges.filter(e =>

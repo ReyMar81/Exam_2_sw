@@ -6,17 +6,20 @@ import DiagramEditor from "./pages/DiagramEditor";
 import AcceptInvite from "./pages/AcceptInvite";
 import Login from "./pages/Login";
 import ErrorBoundary from "./components/ErrorBoundary";
+import { ViewModeProvider } from "./store/ViewModeContext";
 
 createRoot(document.getElementById("root")!).render(
   <ErrorBoundary>
-    <BrowserRouter>
-      <Routes>
-        <Route path="/" element={<App />} />
-        <Route path="/dashboard" element={<App />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/project/:projectId" element={<DiagramEditor />} />
-        <Route path="/invite/:token" element={<AcceptInvite />} />
-      </Routes>
-    </BrowserRouter>
+    <ViewModeProvider>
+      <BrowserRouter>
+        <Routes>
+          <Route path="/" element={<App />} />
+          <Route path="/dashboard" element={<App />} />
+          <Route path="/login" element={<Login />} />
+          <Route path="/project/:projectId" element={<DiagramEditor />} />
+          <Route path="/invite/:token" element={<AcceptInvite />} />
+        </Routes>
+      </BrowserRouter>
+    </ViewModeProvider>
   </ErrorBoundary>
 );

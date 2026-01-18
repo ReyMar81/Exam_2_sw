@@ -1,6 +1,8 @@
 import React from "react";
 import { Handle, Position } from "reactflow";
 import type { Field, TableData } from "@shared/types";
+import { useViewMode } from "../store/ViewModeContext";
+import { sqlToUmlType, isForeignKeyField } from "../utils/typeMapping";
 
 interface TableNodeProps {
   id: string;
@@ -11,6 +13,20 @@ interface TableNodeProps {
 export default function TableNode({ id, data, selected }: TableNodeProps) {
   const tableName = data.name || data.label || "NuevaTabla";
   const fields = data.fields || [];
+  const { viewMode } = useViewMode();
+
+  // 🎨 Filtrar campos según el modo de vista
+  const visibleFields = viewMode === "UML" 
+    ? fields.filter(f => !isForeignKeyField(f)) 
+    : fields;
+
+  // 🎨 Obtener tipo a mostrar según el modo
+  const getDisplayType = (field: Field): string => {
+    if (viewMode === "UML") {
+      return sqlToUmlType(field.type);
+    }
+    return field.type;
+  };
 
   return (
     <div
@@ -34,19 +50,19 @@ export default function TableNode({ id, data, selected }: TableNodeProps) {
       </div>
 
       <div style={{ padding: "10px 12px" }}>
-        {fields.length === 0 ? (
+        {visibleFields.length === 0 ? (
           <div style={{ color: "#777", fontSize: 11, textAlign: "center", fontStyle: "italic", padding: "8px 0" }}>
             (sin campos)
           </div>
         ) : (
-          fields.map((f: Field) => (
+          visibleFields.map((f: Field) => (
             <div key={f.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, margin: "4px 0", padding: "4px 6px", background: "#2a2a2a", borderRadius: 4, borderLeft: f.isPrimary ? "3px solid #FFD700" : f.isForeign ? "3px solid #667eea" : "3px solid transparent" }}>
               <span style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
                 {f.isPrimary && <span title="Primary Key"></span>}
                 {f.isForeign && <span title="Foreign Key"></span>}
                 <span style={{ fontWeight: f.isPrimary ? 700 : 400 }}>{f.name}</span>
               </span>
-              <span style={{ color: "#999", fontSize: 10, fontFamily: "monospace" }}>{f.type}</span>
+              <span style={{ color: "#999", fontSize: 10, fontFamily: "monospace" }}>{getDisplayType(f)}</span>
             </div>
           ))
         )}

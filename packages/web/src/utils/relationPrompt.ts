@@ -1,110 +1,254 @@
 import Swal from "sweetalert2";
 
-export async function askRelationType(): Promise<string | null> {
+export interface RelationConfig {
+  type: string;
+  multiplicity?: "1-1" | "1-N";
+}
+
+export async function askRelationType(): Promise<RelationConfig | null> {
+  // Paso 1: Seleccionar tipo de relación con CARDS
   const { value: type } = await Swal.fire({
-    title: "Selecciona tipo de relación",
+    title: "Selecciona el tipo de relación",
     html: `
-      <div style="text-align:left; padding: 20px; font-size: 14px; line-height: 1.8; color: #e0e0e0;">
+      <style>
+        .relation-grid {
+          display: grid;
+          grid-template-columns: 1fr;
+          gap: 12px;
+          padding: 10px;
+          max-height: 500px;
+          overflow-y: auto;
+        }
+        .relation-category {
+          margin-bottom: 8px;
+        }
+        .category-title {
+          font-size: 13px;
+          font-weight: 600;
+          color: #74b9ff;
+          margin-bottom: 8px;
+          padding: 8px 12px;
+          background: rgba(116, 185, 255, 0.1);
+          border-radius: 6px;
+          text-align: left;
+        }
+        .category-title.uml {
+          color: #9b59b6;
+          background: rgba(155, 89, 182, 0.1);
+        }
+        .relation-card {
+          background: #2a2a2a;
+          border: 2px solid #444;
+          border-radius: 8px;
+          padding: 12px 16px;
+          cursor: pointer;
+          transition: all 0.2s;
+          text-align: left;
+        }
+        .relation-card:hover {
+          border-color: #0984e3;
+          background: #333;
+          transform: translateY(-2px);
+        }
+        .relation-card-title {
+          font-size: 15px;
+          font-weight: 600;
+          color: #fff;
+          margin-bottom: 4px;
+        }
+        .relation-card-desc {
+          font-size: 12px;
+          color: #aaa;
+        }
+      </style>
+      <div class="relation-grid">
+        <div class="relation-category">
+          <div class="category-title">🗂️ BASE DE DATOS (Crow's Foot)</div>
+          <div class="relation-card" data-value="1-1">
+            <div class="relation-card-title">1:1 — Uno a uno</div>
+            <div class="relation-card-desc">Ej: Usuario ↔ Perfil</div>
+          </div>
+          <div class="relation-card" data-value="1-N">
+            <div class="relation-card-title">1:N — Uno a muchos</div>
+            <div class="relation-card-desc">Ej: Departamento → Empleados</div>
+          </div>
+          <div class="relation-card" data-value="N-N">
+            <div class="relation-card-title">N:N — Muchos a muchos</div>
+            <div class="relation-card-desc">Ej: Estudiantes ↔ Cursos</div>
+          </div>
+        </div>
         
-        <div style="margin-bottom: 20px; padding-bottom: 15px; border-bottom: 1px solid #444;">
-          <h4 style="color: #74b9ff; margin-bottom: 10px; font-size: 15px;">🗂️ Crow's Foot (Base de Datos)</h4>
-          <div style="margin-bottom: 12px;">
-            <strong style="color: #74b9ff;">1‒1</strong> → Uno a uno 
-            <span style="opacity: 0.7; font-size: 12px;">(ej: Usuario–Perfil)</span>
+        <div class="relation-category">
+          <div class="category-title uml">📐 UML 2.5 (Diseño Orientado a Objetos)</div>
+          <div class="relation-card" data-value="ASSOCIATION">
+            <div class="relation-card-title">→ Asociación</div>
+            <div class="relation-card-desc">Relación de conocimiento mutuo</div>
           </div>
-          <div style="margin-bottom: 12px;">
-            <strong style="color: #00cec9;">1‒N</strong> → Uno a muchos 
-            <span style="opacity: 0.7; font-size: 12px;">(ej: Rol–Usuario)</span>
+          <div class="relation-card" data-value="AGGREGATION">
+            <div class="relation-card-title">◇→ Agregación</div>
+            <div class="relation-card-desc">Relación "tiene-un" débil</div>
           </div>
-          <div style="margin-bottom: 12px;">
-            <strong style="color: #ff7675;">N‒N</strong> → Muchos a muchos 
-            <span style="opacity: 0.7; font-size: 12px;">(ej: Estudiante–Curso)</span>
+          <div class="relation-card" data-value="COMPOSITION">
+            <div class="relation-card-title">◆→ Composición</div>
+            <div class="relation-card-desc">Relación "parte-de" fuerte</div>
           </div>
-        </div>
-
-        <div>
-          <h4 style="color: #9b59b6; margin-bottom: 10px; font-size: 15px;">📐 UML 2.5 (Diseño Conceptual)</h4>
-          <div style="margin-bottom: 12px;">
-            <strong style="color: #9b59b6;">→</strong> <strong>Asociación</strong> 
-            <span style="opacity: 0.7; font-size: 12px;">(relación bidireccional simple)</span>
+          <div class="relation-card" data-value="INHERITANCE">
+            <div class="relation-card-title">△ Herencia</div>
+            <div class="relation-card-desc">Generalización "es-un"</div>
           </div>
-          <div style="margin-bottom: 12px;">
-            <strong style="color: #3498db;">◇→</strong> <strong>Agregación</strong> 
-            <span style="opacity: 0.7; font-size: 12px;">(el todo sin partes puede existir)</span>
+          <div class="relation-card" data-value="DEPENDENCY">
+            <div class="relation-card-title">⇢ Dependencia</div>
+            <div class="relation-card-desc">Una clase usa otra temporalmente</div>
           </div>
-          <div style="margin-bottom: 12px;">
-            <strong style="color: #e74c3c;">◆→</strong> <strong>Composición</strong> 
-            <span style="opacity: 0.7; font-size: 12px;">(ciclo de vida dependiente)</span>
-          </div>
-          <div style="margin-bottom: 12px;">
-            <strong style="color: #2ecc71;">△</strong> <strong>Herencia</strong> 
-            <span style="opacity: 0.7; font-size: 12px;">(generalización/especialización)</span>
-          </div>
-          <div style="margin-bottom: 12px;">
-            <strong style="color: #f39c12;">⇢</strong> <strong>Dependencia</strong> 
-            <span style="opacity: 0.7; font-size: 12px;">(usa temporalmente)</span>
-          </div>
-          <div>
-            <strong style="color: #1abc9c;">△⋯</strong> <strong>Realización</strong> 
-            <span style="opacity: 0.7; font-size: 12px;">(implementa interfaz)</span>
+          <div class="relation-card" data-value="REALIZATION">
+            <div class="relation-card-title">△⋯ Realización</div>
+            <div class="relation-card-desc">Implementa una interfaz</div>
           </div>
         </div>
-
       </div>
     `,
-    input: "select",
-    inputOptions: {
-      // Crow's Foot
-      "1-1": "🗂️ 1‒1 (uno a uno)",
-      "1-N": "🗂️ 1‒N (uno a muchos)",
-      "N-N": "🗂️ N‒N (muchos a muchos)",
-      
-      // UML 2.5
-      "ASSOCIATION": "📐 → Asociación",
-      "AGGREGATION": "📐 ◇→ Agregación",
-      "COMPOSITION": "📐 ◆→ Composición",
-      "INHERITANCE": "📐 △ Herencia",
-      "DEPENDENCY": "📐 ⇢ Dependencia",
-      "REALIZATION": "📐 △⋯ Realización",
-    },
-    inputPlaceholder: "Selecciona un tipo...",
-    confirmButtonText: "Aceptar",
-    cancelButtonText: "Cancelar",
+    showConfirmButton: false,
     showCancelButton: true,
-    confirmButtonColor: "#0984e3",
+    cancelButtonText: "Cancelar",
     cancelButtonColor: "#636e72",
     background: "#1e1e1e",
     color: "#fff",
+    width: '500px',
     customClass: {
       popup: "swal-dark-popup",
-      confirmButton: "swal-confirm-btn",
       cancelButton: "swal-cancel-btn",
       htmlContainer: "swal-html-dark",
-      input: "swal-dark-select"
     },
     didOpen: () => {
-      // Aplicar estilos al select después de que se renderice
-      const selectElement = document.querySelector('.swal2-select') as HTMLSelectElement;
-      if (selectElement) {
-        selectElement.style.backgroundColor = '#2a2a2a';
-        selectElement.style.color = '#ffffff';
-        selectElement.style.border = '2px solid #0984e3';
-        selectElement.style.padding = '12px';
-        selectElement.style.fontSize = '15px';
-        selectElement.style.borderRadius = '6px';
-        selectElement.style.cursor = 'pointer';
-        selectElement.style.width = '100%';
-        
-        // Estilos para opciones (funciona en algunos navegadores)
-        const options = selectElement.querySelectorAll('option');
-        options.forEach((option) => {
-          (option as HTMLOptionElement).style.backgroundColor = '#2a2a2a';
-          (option as HTMLOptionElement).style.color = '#ffffff';
-          (option as HTMLOptionElement).style.padding = '10px';
+      const cards = document.querySelectorAll('.relation-card');
+      cards.forEach((card) => {
+        card.addEventListener('click', () => {
+          const value = (card as HTMLElement).getAttribute('data-value');
+          Swal.clickConfirm();
+          (Swal as any).selectedValue = value;
         });
-      }
+      });
+    },
+    preConfirm: () => {
+      return (Swal as any).selectedValue;
     }
   });
 
-  return type || null;
+  if (!type) return null;
+
+  // Paso 2: Si es ASSOCIATION, AGGREGATION o COMPOSITION, preguntar multiplicidad
+  if (type === "ASSOCIATION" || type === "AGGREGATION" || type === "COMPOSITION") {
+    const relationName = 
+      type === "ASSOCIATION" ? "Asociación" :
+      type === "AGGREGATION" ? "Agregación" :
+      "Composición";
+
+    const { value: multiplicity } = await Swal.fire({
+      title: `${relationName}: Multiplicidad`,
+      html: `
+        <style>
+          .multiplicity-grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+            padding: 10px;
+          }
+          .multiplicity-card {
+            background: #2a2a2a;
+            border: 2px solid #444;
+            border-radius: 8px;
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-align: left;
+          }
+          .multiplicity-card:hover {
+            border-color: #0984e3;
+            background: #333;
+            transform: translateY(-2px);
+          }
+          .multiplicity-card.selected {
+            border-color: #0984e3;
+            background: #1a3a52;
+          }
+          .multiplicity-card-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 8px;
+          }
+          .multiplicity-card-desc {
+            font-size: 13px;
+            color: #aaa;
+            line-height: 1.5;
+          }
+          .multiplicity-card-example {
+            font-size: 12px;
+            color: #74b9ff;
+            margin-top: 8px;
+            font-style: italic;
+          }
+        </style>
+        <div class="multiplicity-grid">
+          <div class="multiplicity-card" data-value="1-1">
+            <div class="multiplicity-card-title">🔹 1 a 1 (uno a uno)</div>
+            <div class="multiplicity-card-desc">
+              Cada elemento del origen se relaciona con <strong>exactamente uno</strong> en el destino
+            </div>
+            <div class="multiplicity-card-example">Ejemplo: Persona [1] → [1] Pasaporte</div>
+          </div>
+          
+          <div class="multiplicity-card selected" data-value="1-N">
+            <div class="multiplicity-card-title">🔹 1 a Muchos (1:N)</div>
+            <div class="multiplicity-card-desc">
+              Cada elemento del origen puede tener <strong>varios</strong> en el destino
+            </div>
+            <div class="multiplicity-card-example">Ejemplo: Departamento [1] ◇→ [*] Empleados</div>
+          </div>
+        </div>
+      `,
+      showConfirmButton: true,
+      showCancelButton: true,
+      confirmButtonText: "Crear relación",
+      cancelButtonText: "← Atrás",
+      confirmButtonColor: "#0984e3",
+      cancelButtonColor: "#636e72",
+      background: "#1e1e1e",
+      color: "#fff",
+      width: '520px',
+      customClass: {
+        popup: "swal-dark-popup",
+        confirmButton: "swal-confirm-btn",
+        cancelButton: "swal-cancel-btn",
+        htmlContainer: "swal-html-dark",
+      },
+      didOpen: () => {
+        // Pre-seleccionar 1-N por defecto
+        (Swal as any).selectedMultiplicity = "1-N";
+        
+        const cards = document.querySelectorAll('.multiplicity-card');
+        cards.forEach((card) => {
+          card.addEventListener('click', () => {
+            // Remover selección previa
+            cards.forEach(c => c.classList.remove('selected'));
+            // Agregar selección a la actual
+            card.classList.add('selected');
+            
+            const value = (card as HTMLElement).getAttribute('data-value');
+            (Swal as any).selectedMultiplicity = value;
+          });
+        });
+      },
+      preConfirm: () => {
+        return (Swal as any).selectedMultiplicity;
+      }
+    });
+
+    if (!multiplicity) return null; // Usuario canceló
+
+    return { type, multiplicity: multiplicity as "1-1" | "1-N" };
+  }
+
+  // Para otros tipos, no necesitan multiplicidad personalizada
+  return { type };
 }
