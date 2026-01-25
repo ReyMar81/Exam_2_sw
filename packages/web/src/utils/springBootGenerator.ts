@@ -22,6 +22,9 @@ interface TableMetadata {
   isJunctionTable: boolean;
   hasAdditionalFields: boolean;
   isPureJoinTable?: boolean; // Nueva: indica si es join pura (solo 2 FKs)
+  parentClass?: string; // Nombre de la clase padre si tiene herencia (△)
+  parentTable?: string; // Nombre de la tabla padre
+  cardinalityMap?: Map<string, { source: string; target: string; type: string }>; // Multiplicidades desde edges
 }
 
 /**
@@ -99,7 +102,7 @@ export async function generateSpringBootProject(
     // Generar CRUD para todas las entidades con id
     zip.file(
       `${baseDir}/${packagePath}/repository/${table.className}Repository.java`,
-      generateRepository(table, packageName)
+      generateRepository(table, packageName, tablesMetadata)
     );
 
     zip.file(
@@ -123,14 +126,62 @@ export async function generateSpringBootProject(
 }
 
 /**
- * Analiza metadata de tablas incluyendo detección de tablas intermedias
+ * Analiza metadata de tablas incluyendo detección de tablas intermedias y herencias
  */
 function analyzeTablesMetadata(nodes: Node[], edges: Edge[]): TableMetadata[] {
-  return nodes.map(node => {
+  // 🎯 Primero, construir un mapa de herencias desde los edges
+  const inheritanceMap = new Map<string, string>();
+  
+  // 🔗 Construir un mapa de cardinalidades desde los edges
+  const cardinalityMap = new Map<string, { source: string; target: string; type: string }>();
+  
+  edges.forEach(edge => {
+    const edgeData = edge.data as any;
+    
+    if (edgeData?.relationType === 'INHERITANCE') {
+      // En UML: la flecha apunta al padre (source hereda de target)
+      // Edge: Hijo → Padre, entonces source hereda de target
+      const sourceNode = nodes.find(n => n.id === edge.source);
+      const targetNode = nodes.find(n => n.id === edge.target);
+      
+      if (sourceNode && targetNode) {
+        const sourceTable = ((sourceNode.data as TableData).name || '').toLowerCase().replace(/\s+/g, '_');
+        const targetTable = ((targetNode.data as TableData).name || '').toLowerCase().replace(/\s+/g, '_');
+        // source (hijo) hereda de target (padre)
+        inheritanceMap.set(sourceTable, targetTable);
+        console.log(`🔺 [Inheritance Edge] ${sourceTable} extends ${targetTable}`);
+      }
+    } else {
+      // Guardar multiplicidad de relaciones normales
+      const sourceNode = nodes.find(n => n.id === edge.source);
+      const targetNode = nodes.find(n => n.id === edge.target);
+      
+      if (sourceNode && targetNode) {
+        const sourceTable = ((sourceNode.data as TableData).name || '').toLowerCase().replace(/\s+/g, '_');
+        const targetTable = ((targetNode.data as TableData).name || '').toLowerCase().replace(/\s+/g, '_');
+        
+        const sourceMultiplicity = edgeData?.sourceMultiplicity || edgeData?.sourceLabel || '*';
+        const targetMultiplicity = edgeData?.targetMultiplicity || edgeData?.targetLabel || '*';
+        
+        // Guardar ambas direcciones
+        cardinalityMap.set(`${sourceTable}->${targetTable}`, {
+          source: sourceMultiplicity,
+          target: targetMultiplicity,
+          type: edgeData?.relationType || 'ASSOCIATION'
+        });
+        
+        console.log(`🔗 [Edge] ${sourceTable} [${sourceMultiplicity}]--[${targetMultiplicity}] ${targetTable} (${edgeData?.relationType || 'ASSOCIATION'})`);
+      }
+    }
+  });
+  
+  const metadata = nodes.map(node => {
     const data = node.data as TableData;
     const tableName = (data.name || data.label || "tabla").toLowerCase().replace(/\s+/g, '_');
     const className = toPascalCase(tableName);
-    const fields = data.fields || [];
+    
+    // 🚫 Filtrar métodos (isMethod = true) ya que no son campos de BD
+    const fields = (data.fields || []).filter(f => !f.isMethod);
 
     const primaryKey = fields.find(f => f.isPrimary) || null;
     const foreignKeys = fields
@@ -153,6 +204,25 @@ function analyzeTablesMetadata(nodes: Node[], edges: Edge[]): TableMetadata[] {
     // Es tabla intermedia si tiene 2 FKs (puede ser pura o extendida)
     const isJunctionTable = fkCount === 2;
 
+    // 🎯 Detectar HERENCIA: primero desde edges, luego desde campos
+    let parentTable: string | undefined;
+    let parentClass: string | undefined;
+    
+    // Opción 1: Desde edges del diagrama
+    if (inheritanceMap.has(tableName)) {
+      parentTable = inheritanceMap.get(tableName);
+      parentClass = toPascalCase(parentTable!);
+      console.log(`✅ [Inheritance] ${className} extends ${parentClass} (from edge)`);
+    } else {
+      // Opción 2: Desde campos con relationType = "INHERITANCE"
+      const inheritanceFk = fields.find(f => f.isForeign && f.relationType === 'INHERITANCE');
+      if (inheritanceFk && inheritanceFk.references) {
+        parentTable = inheritanceFk.references.toLowerCase().replace(/\s+/g, '_');
+        parentClass = toPascalCase(parentTable);
+        console.log(`✅ [Inheritance] ${className} extends ${parentClass} (from field)`);
+      }
+    }
+
     return {
       tableName,
       className,
@@ -161,9 +231,14 @@ function analyzeTablesMetadata(nodes: Node[], edges: Edge[]): TableMetadata[] {
       foreignKeys,
       isJunctionTable,
       hasAdditionalFields,
-      isPureJoinTable
+      isPureJoinTable,
+      parentClass,
+      parentTable,
+      cardinalityMap // Pasar el mapa de cardinalidades
     };
   });
+  
+  return metadata;
 }
 
 /**
@@ -495,6 +570,19 @@ function generateEntity(
 
   let classAnnotations = '@Entity\n';
   classAnnotations += `@Table(name = "${table.tableName}")\n`;
+  
+  // 🎯 HERENCIA JPA: Configurar estrategia si es clase padre o hija
+  if (table.parentClass) {
+    // Es subclase: no necesita @Inheritance (se hereda del padre)
+  } else {
+    // Verificar si es clase padre (otras tablas heredan de esta)
+    const isParent = allTables.some(t => t.parentTable === table.tableName);
+    if (isParent) {
+      classAnnotations += '@Inheritance(strategy = InheritanceType.JOINED)\n';
+      console.log(`🔺 [Inheritance] ${table.className} is parent class (JOINED strategy)`);
+    }
+  }
+  
   classAnnotations += '@Data\n';
   classAnnotations += '@NoArgsConstructor\n';
   classAnnotations += '@AllArgsConstructor';
@@ -537,8 +625,20 @@ function generateEntity(
     const javaField = toCamelCase(field.name);
     const javaType = mapSqlToJavaType(field.type);
 
+    // 🎯 HERENCIA: Saltar FK de herencia (se maneja con extends, no con campo)
+    if (field.isForeign && field.relationType === 'INHERITANCE') {
+      console.log(`⏭️ [Inheritance] Skipping FK field ${field.name} in ${table.className} (handled by extends)`);
+      return; // No generar campo para FK de herencia
+    }
+
     // Primary Key
     if (field.isPrimary) {
+      // Si tiene herencia, el PK se hereda del padre (no re-declarar @Id)
+      if (table.parentClass) {
+        console.log(`⏭️ [Inheritance] Skipping PK ${field.name} in ${table.className} (inherited from ${table.parentClass})`);
+        return; // Skip: el @Id se hereda de la clase padre
+      }
+      
       fieldsCode += '    @Id\n';
       fieldsCode += '    @GeneratedValue(strategy = GenerationType.IDENTITY)\n';
     }
@@ -552,13 +652,21 @@ function generateEntity(
         // 🎯 UML 2.5: Determinar tipo de relación y CASCADE
         const relationType = field.relationType || "1-N";
         
-        // 🎯 HERENCIA: El PK del hijo ES el FK al padre (@MapsId + @OneToOne)
-        if (relationType === 'INHERITANCE' && field.isPrimary) {
-          fieldsCode += `    @MapsId\n`;
-          fieldsCode += `    @OneToOne(fetch = FetchType.EAGER, cascade = {CascadeType.PERSIST, CascadeType.MERGE}, optional = false)\n`;
-          fieldsCode += `    @JoinColumn(name = "${field.name}", nullable = false)\n`;
-          fieldsCode += `    private ${refTable.className} ${toCamelCase(refTable.tableName)};\n\n`;
-          return;
+        // 🎯 CARDINALIDAD: Detectar si es 1-1 o N-1 desde el edge
+        let isOneToOne = false;
+        
+        // Buscar en cardinalityMap la multiplicidad de esta relación
+        if (table.cardinalityMap) {
+          const edgeKey = `${table.tableName}->${refTableName}`;
+          const reverseKey = `${refTableName}->${table.tableName}`;
+          
+          const cardInfo = table.cardinalityMap.get(edgeKey) || table.cardinalityMap.get(reverseKey);
+          
+          if (cardInfo) {
+            // Si ambos lados son "1", es 1-1
+            isOneToOne = (cardInfo.source === '1' && cardInfo.target === '1');
+            console.log(`🔗 [Relation] ${table.className}.${field.name} → ${refTable.className} [${cardInfo.source}:${cardInfo.target}] ${isOneToOne ? '@OneToOne' : '@ManyToOne'}`);
+          }
         }
         
         // 🎯 Otras relaciones (COMPOSITION, AGGREGATION, ASSOCIATION)
@@ -569,15 +677,15 @@ function generateEntity(
         
         switch (relationType) {
           case 'COMPOSITION':
-            // ◆ Composición: Sin CASCADE en @ManyToOne (se maneja desde @OneToMany inverso)
-            cascadeType = '';
+            // ◆ Composición: Solo PERSIST (la BD maneja el CASCADE DELETE)
+            cascadeType = ', cascade = CascadeType.PERSIST';
             optional = 'optional = false';
             fetchType = 'FetchType.LAZY';
             jsonIgnore = '    @com.fasterxml.jackson.annotation.JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})\n';
             break;
             
           case 'AGGREGATION':
-            // ◇ Agregación: Sin CASCADE, opcional
+            // ◇ Agregación: Sin CASCADE (el hijo puede existir independientemente)
             cascadeType = '';
             optional = 'optional = true';
             fetchType = 'FetchType.LAZY';
@@ -585,7 +693,7 @@ function generateEntity(
             break;
             
           default:
-            // ASSOCIATION, 1-1, 1-N: Sin CASCADE en @ManyToOne
+            // ASSOCIATION, 1-1, 1-N: Sin CASCADE por defecto
             cascadeType = '';
             optional = field.nullable ? 'optional = true' : 'optional = false';
             fetchType = 'FetchType.LAZY';
@@ -593,7 +701,22 @@ function generateEntity(
         }
         
         fieldsCode += jsonIgnore;
-        fieldsCode += `    @ManyToOne(fetch = ${fetchType}${cascadeType}, ${optional})\n`;
+        
+        // 🎯 CARDINALIDAD: @OneToOne vs @ManyToOne
+        if (isOneToOne) {
+          fieldsCode += `    @OneToOne(fetch = ${fetchType}${cascadeType}, ${optional})\n`;
+        } else {
+          fieldsCode += `    @ManyToOne(fetch = ${fetchType}${cascadeType}, ${optional})\n`;
+        }
+        
+        // 🎯 Determinar ON DELETE para @ForeignKey según relationType
+        let onDeleteClause = '';
+        if (relationType === 'COMPOSITION') {
+          onDeleteClause = ' ON DELETE CASCADE';
+        } else {
+          onDeleteClause = ' ON DELETE RESTRICT';
+        }
+        
         fieldsCode += `    @JoinColumn(name = "${field.name}"`;
         
         // Agregar nullable según campo
@@ -602,6 +725,9 @@ function generateEntity(
         } else {
           fieldsCode += ', nullable = false';
         }
+        
+        // Agregar foreignKey constraint que coincida con SQL
+        fieldsCode += `, foreignKey = @ForeignKey(name = "fk_${table.tableName}_${toCamelCase(refTable.tableName)}")`;
         
         fieldsCode += ')\n';
         fieldsCode += `    private ${refTable.className} ${toCamelCase(refTable.tableName)};\n\n`;
@@ -636,21 +762,40 @@ function generateEntity(
 
   console.log(`✅ [AI JavaGen] Generated entity ${table.className} with ${imports.size} imports`);
 
+  // 🎯 HERENCIA: Generar extends ParentClass
+  const extendsClause = table.parentClass ? ` extends ${table.parentClass}` : '';
+  
+  if (table.parentClass) {
+    console.log(`🔺 [Inheritance] ${table.className} extends ${table.parentClass} - PK will be inherited`);
+  }
+
   return `package ${packageName}.entity;
 
 ${importsCode}
 
 ${classAnnotations}
-public class ${table.className} {
-${fieldsCode}}
-`;
+public class ${table.className}${extendsClause} {
+${fieldsCode}}`;
 }
 
 /**
  * Genera repositorio JPA
  */
-function generateRepository(table: TableMetadata, packageName: string): string {
-  const idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Integer';
+function generateRepository(table: TableMetadata, packageName: string, allTables?: TableMetadata[]): string {
+  // 🎯 HERENCIA: Si hereda de otra tabla, usar el tipo de PK del padre
+  let idType = 'Integer';
+  
+  if (table.parentClass && table.parentTable && allTables) {
+    const parentTable = allTables.find(t => t.tableName === table.parentTable);
+    if (parentTable && parentTable.primaryKey) {
+      idType = mapSqlToJavaType(parentTable.primaryKey.type);
+      console.log(`🔺 [Inheritance] ${table.className}Repository uses PK type from ${table.parentClass}: ${idType}`);
+    } else {
+      idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Integer';
+    }
+  } else {
+    idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Integer';
+  }
   
   return `package ${packageName}.repository;
 
@@ -668,9 +813,26 @@ public interface ${table.className}Repository extends JpaRepository<${table.clas
  * Genera servicio con lógica CRUD y soporte para DTOs
  */
 function generateService(table: TableMetadata, packageName: string, allTables: TableMetadata[]): string {
-  const idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Integer';
+  // 🎯 HERENCIA: Si hereda de otra tabla, usar el tipo y nombre de PK del padre
+  let idType = 'Integer';
+  let idFieldName = 'id';
+  
+  if (table.parentClass && table.parentTable) {
+    const parentTable = allTables.find(t => t.tableName === table.parentTable);
+    if (parentTable && parentTable.primaryKey) {
+      idType = mapSqlToJavaType(parentTable.primaryKey.type);
+      idFieldName = parentTable.primaryKey.name;
+      console.log(`🔺 [Inheritance] ${table.className}Service uses PK from ${table.parentClass}: ${idFieldName} (${idType})`);
+    } else {
+      idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Integer';
+      idFieldName = table.primaryKey?.name || 'id';
+    }
+  } else {
+    idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Integer';
+    idFieldName = table.primaryKey?.name || 'id';
+  }
+  
   const entityVar = toCamelCase(table.className);
-  const idFieldName = table.primaryKey?.name || 'id';
   
   // Detectar relaciones FK para construir saveFromDTO
   const fkRelations = table.fields.filter(f => f.isForeign && f.references);
@@ -819,7 +981,21 @@ public class ${table.className}Service {
  * Genera controlador REST con soporte para DTOs
  */
 function generateController(table: TableMetadata, packageName: string, allTables: TableMetadata[]): string {
-  const idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Integer';
+  // 🎯 HERENCIA: Si hereda de otra tabla, usar el tipo de PK del padre
+  let idType = 'Integer';
+  
+  if (table.parentClass && table.parentTable) {
+    const parentTable = allTables.find(t => t.tableName === table.parentTable);
+    if (parentTable && parentTable.primaryKey) {
+      idType = mapSqlToJavaType(parentTable.primaryKey.type);
+      console.log(`🔺 [Inheritance] ${table.className}Controller uses PK type from ${table.parentClass}: ${idType}`);
+    } else {
+      idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Integer';
+    }
+  } else {
+    idType = table.primaryKey ? mapSqlToJavaType(table.primaryKey.type) : 'Integer';
+  }
+  
   const entityVar = toCamelCase(table.className);
   const pluralName = table.tableName; // Usar nombre de tabla como plural en minúsculas
   
@@ -903,9 +1079,36 @@ public class ${table.className}Controller {
 }
 
 /**
+ * Genera valor de ejemplo según el tipo Java
+ */
+function getExampleValue(javaType: string): string {
+  switch (javaType) {
+    case 'Integer':
+    case 'Long':
+    case 'Short':
+      return '123';
+    case 'Double':
+    case 'Float':
+      return '123.45';
+    case 'BigDecimal':
+      return '"999.99"';
+    case 'Boolean':
+      return 'true';
+    case 'LocalDate':
+      return '"2026-01-24"';
+    case 'LocalDateTime':
+      return '"2026-01-24T12:00:00"';
+    case 'LocalTime':
+      return '"12:00:00"';
+    default:
+      return '"texto_ejemplo"';
+  }
+}
+
+/**
  * Genera ejemplos JSON para cada entidad usando DTOs
  */
-function generateJsonExamples(tablesMetadata: TableMetadata[]): string {
+function generateJsonExamples(tablesMetadata: TableMetadata[], port: number): string {
   let examples = '';
   
   tablesMetadata.forEach(table => {
@@ -914,7 +1117,11 @@ function generateJsonExamples(tablesMetadata: TableMetadata[]): string {
     const hasFKRelations = table.fields.some(f => f.isForeign && f.references && f.relationType !== 'INHERITANCE');
     
     examples += `### ${table.tableName} (${table.className})\n\n`;
-    examples += `**Endpoint:** \`http://localhost:{PORT}/${table.tableName}\`\n\n`;
+    examples += `**Endpoint:** \`http://localhost:${port}/${table.tableName}\`\n\n`;
+    
+    if (table.parentClass) {
+      examples += `**Hereda de:** ${table.parentClass}\n\n`;
+    }
     
     if (hasFKRelations) {
       examples += `**POST/PUT JSON (usando DTO con IDs):**\n\n`;
@@ -926,6 +1133,22 @@ function generateJsonExamples(tablesMetadata: TableMetadata[]): string {
     examples += '{\n';
     
     const exampleFields: string[] = [];
+    
+    // 🎯 HERENCIA: Incluir campos del padre primero
+    if (table.parentClass && table.parentTable) {
+      const parentTable = tablesMetadata.find(t => t.tableName === table.parentTable);
+      if (parentTable) {
+        parentTable.fields.forEach(field => {
+          if (field.isPrimary) return; // Skip PK del padre (se hereda)
+          if (field.isForeign && field.relationType === 'INHERITANCE') return;
+          
+          const javaField = toCamelCase(field.name);
+          const javaType = mapSqlToJavaType(field.type);
+          let exampleValue = getExampleValue(javaType);
+          exampleFields.push(`  "${javaField}": ${exampleValue}`);
+        });
+      }
+    }
     
     table.fields.forEach(field => {
       // Skip PK (auto-generado) y FKs de herencia (@MapsId)
@@ -942,40 +1165,12 @@ function generateJsonExamples(tablesMetadata: TableMetadata[]): string {
         // FK: Solo el ID (DTO pattern)
         const refTable = field.references.toString().toLowerCase().replace(/\s+/g, '_');
         const refClassName = toPascalCase(refTable);
-        exampleValue = `1 // ID de ${refClassName} (${refTable})`;
         const fieldName = `${toCamelCase(refTable)}Id`;
-        exampleFields.push(`  "${fieldName}": ${exampleValue}`);
+        exampleFields.push(`  "${fieldName}": 1`);
         return;
       }
       
-      switch (javaType) {
-        case 'Integer':
-        case 'Long':
-        case 'Short':
-          exampleValue = '123';
-          break;
-        case 'Double':
-        case 'Float':
-          exampleValue = '123.45';
-          break;
-        case 'BigDecimal':
-          exampleValue = '"999.99"';
-          break;
-        case 'Boolean':
-          exampleValue = 'true';
-          break;
-        case 'LocalDate':
-          exampleValue = '"2026-01-18"';
-          break;
-        case 'LocalDateTime':
-          exampleValue = '"2026-01-18T12:00:00"';
-          break;
-        case 'LocalTime':
-          exampleValue = '"12:00:00"';
-          break;
-        default:
-          exampleValue = `"texto_ejemplo"`;
-      }
+      exampleValue = getExampleValue(javaType);
       
       exampleFields.push(`  "${javaField}": ${exampleValue}`);
     });
@@ -994,14 +1189,14 @@ function generateJsonExamples(tablesMetadata: TableMetadata[]): string {
 function generateReadme(projectName: string, port: number, tablesMetadata: TableMetadata[]): string {
   return `# ${projectName} Backend
 
-Backend Spring Boot generado automáticamente desde diagrama ER por **Exam_2_sw**.
+Backend Spring Boot generado automáticamente desde diagrama ER - UML 2.5 por **Exam_2_sw**.
 
 ## 🚀 Ejecución con Docker (Recomendado)
 
 ### Opción 1: Docker Compose (más simple)
 
 \`\`\`bash
-docker-compose up --build
+docker-compose up -d --build
 \`\`\`
 
 El servidor arrancará automáticamente. Verás en los logs:
@@ -1057,30 +1252,6 @@ Credenciales:
 - **Password:** *(vacío)*
 
 La base de datos se crea automáticamente en memoria con todas las tablas del diagrama.
-
----
-
-## 🔄 Mapeo de Tipos SQL → Java
-
-El generador convierte automáticamente los tipos SQL a tipos Java apropiados:
-
-| Tipo SQL | Tipo Java | Import Automático |
-|----------|-----------|-------------------|
-| \`INT\`, \`SERIAL\` | \`Integer\` | — |
-| \`BIGINT\`, \`BIGSERIAL\` | \`Long\` | — |
-| \`SMALLINT\` | \`Short\` | — |
-| \`VARCHAR\`, \`TEXT\` | \`String\` | — |
-| \`BOOLEAN\` | \`Boolean\` | — |
-| \`DECIMAL\`, \`NUMERIC\` | \`BigDecimal\` | \`java.math.BigDecimal\` |
-| \`FLOAT\`, \`REAL\` | \`Float\` | — |
-| \`DOUBLE\` | \`Double\` | — |
-| \`DATE\` | \`LocalDate\` | \`java.time.LocalDate\` |
-| \`DATETIME\`, \`TIMESTAMP\` | \`LocalDateTime\` | \`java.time.LocalDateTime\` |
-| \`TIME\` | \`LocalTime\` | \`java.time.LocalTime\` |
-| \`UUID\` | \`UUID\` | \`java.util.UUID\` |
-| \`BLOB\`, \`BYTEA\` | \`byte[]\` | — |
-
-> **Nota:** Los imports se agregan automáticamente según los tipos detectados en cada entidad.
 
 ---
 
@@ -1151,7 +1322,7 @@ src/main/java/com/${projectName}/
 
 ### 📝 Ejemplos JSON por Entidad
 
-${generateJsonExamples(tablesMetadata)}
+${generateJsonExamples(tablesMetadata, port)}
 
 ---
 
@@ -1177,7 +1348,7 @@ Edita \`src/main/resources/application.properties\` para cambiar:
 
 ## 📝 Generado por
 
-**Exam_2_sw** - Sistema de diagramas ER colaborativo  
+**Exam_2_sw** - Sistema de diagramas ER - UML 2.5 colaborativo  
 Exportación automática: Spring Boot 3.2 + Maven + Docker  
 Framework: Jakarta EE 9+ (Spring Boot 3.x)
 `;

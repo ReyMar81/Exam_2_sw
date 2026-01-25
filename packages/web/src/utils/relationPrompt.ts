@@ -2,7 +2,7 @@ import Swal from "sweetalert2";
 
 export interface RelationConfig {
   type: string;
-  multiplicity?: "1-1" | "1-N";
+  multiplicity?: "1-1" | "1-N" | "N-N";
 }
 
 export async function askRelationType(): Promise<RelationConfig | null> {
@@ -81,8 +81,8 @@ export async function askRelationType(): Promise<RelationConfig | null> {
         <div class="relation-category">
           <div class="category-title uml">📐 UML 2.5 (Diseño Orientado a Objetos)</div>
           <div class="relation-card" data-value="ASSOCIATION">
-            <div class="relation-card-title">→ Asociación</div>
-            <div class="relation-card-desc">Relación de conocimiento mutuo</div>
+            <div class="relation-card-title">— Asociación</div>
+            <div class="relation-card-desc">Relación de conocimiento mutuo (pide cardinalidad)</div>
           </div>
           <div class="relation-card" data-value="AGGREGATION">
             <div class="relation-card-title">◇→ Agregación</div>
@@ -142,6 +142,9 @@ export async function askRelationType(): Promise<RelationConfig | null> {
       type === "ASSOCIATION" ? "Asociación" :
       type === "AGGREGATION" ? "Agregación" :
       "Composición";
+    
+    // AGGREGATION y COMPOSITION solo permiten 1-1 y 1-N (no N-N)
+    const allowManyToMany = type === "ASSOCIATION";
 
     const { value: multiplicity } = await Swal.fire({
       title: `${relationName}: Multiplicidad`,
@@ -205,6 +208,16 @@ export async function askRelationType(): Promise<RelationConfig | null> {
             </div>
             <div class="multiplicity-card-example">Ejemplo: Departamento [1] ◇→ [*] Empleados</div>
           </div>
+          
+          ${allowManyToMany ? `
+          <div class="multiplicity-card" data-value="N-N">
+            <div class="multiplicity-card-title">🔹 Muchos a Muchos (N:N)</div>
+            <div class="multiplicity-card-desc">
+              Ambos lados pueden tener <strong>múltiples</strong> instancias. <strong>Se crea tabla intermedia automáticamente</strong>
+            </div>
+            <div class="multiplicity-card-example">Ejemplo: Estudiantes [*] ↔ [*] Cursos → Tabla: Estudiante_Curso</div>
+          </div>
+          ` : ''}
         </div>
       `,
       showConfirmButton: true,
@@ -246,7 +259,7 @@ export async function askRelationType(): Promise<RelationConfig | null> {
 
     if (!multiplicity) return null; // Usuario canceló
 
-    return { type, multiplicity: multiplicity as "1-1" | "1-N" };
+    return { type, multiplicity: multiplicity as "1-1" | "1-N" | "N-N" };
   }
 
   // Para otros tipos, no necesitan multiplicidad personalizada

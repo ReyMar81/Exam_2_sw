@@ -76,7 +76,7 @@ export const getEdgeStyle = (type: string) => {
         strokeWidth: 2,
         animated: false,
         strokeDasharray: undefined,
-        markerEnd: { type: "arrowclosed", color: "#9b59b6" },
+        // ASOCIACIÓN no lleva flecha, solo línea con multiplicidad
       };
     
     case "AGGREGATION":

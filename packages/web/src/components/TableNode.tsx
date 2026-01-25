@@ -15,17 +15,24 @@ export default function TableNode({ id, data, selected }: TableNodeProps) {
   const fields = data.fields || [];
   const { viewMode } = useViewMode();
 
+  // 🎨 Separar atributos y métodos
+  const attributes = fields.filter(f => !f.isMethod);
+  const methods = fields.filter(f => f.isMethod);
+
   // 🎨 Filtrar campos según el modo de vista
-  const visibleFields = viewMode === "UML" 
-    ? fields.filter(f => !isForeignKeyField(f)) 
-    : fields;
+  const visibleAttributes = viewMode === "UML" 
+    ? attributes.filter(f => !isForeignKeyField(f)) 
+    : attributes;
+
+  // 🎨 Los métodos solo se muestran en vista UML
+  const visibleMethods = viewMode === "UML" ? methods : [];
 
   // 🎨 Obtener tipo a mostrar según el modo
   const getDisplayType = (field: Field): string => {
     if (viewMode === "UML") {
-      return sqlToUmlType(field.type);
+      return sqlToUmlType(field.type || "");
     }
-    return field.type;
+    return field.type || "";
   };
 
   return (
@@ -50,21 +57,52 @@ export default function TableNode({ id, data, selected }: TableNodeProps) {
       </div>
 
       <div style={{ padding: "10px 12px" }}>
-        {visibleFields.length === 0 ? (
+        {/* Atributos */}
+        {visibleAttributes.length === 0 ? (
           <div style={{ color: "#777", fontSize: 11, textAlign: "center", fontStyle: "italic", padding: "8px 0" }}>
-            (sin campos)
+            (sin atributos)
           </div>
         ) : (
-          visibleFields.map((f: Field) => (
+          visibleAttributes.map((f: Field) => (
             <div key={f.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 11, margin: "4px 0", padding: "4px 6px", background: "#2a2a2a", borderRadius: 4, borderLeft: f.isPrimary ? "3px solid #FFD700" : f.isForeign ? "3px solid #667eea" : "3px solid transparent" }}>
               <span style={{ display: "flex", alignItems: "center", gap: 4, flex: 1 }}>
-                {f.isPrimary && <span title="Primary Key"></span>}
-                {f.isForeign && <span title="Foreign Key"></span>}
+                {f.isPrimary && <span title="Primary Key">🔑</span>}
+                {f.isForeign && <span title="Foreign Key">🔗</span>}
                 <span style={{ fontWeight: f.isPrimary ? 700 : 400 }}>{f.name}</span>
               </span>
               <span style={{ color: "#999", fontSize: 10, fontFamily: "monospace" }}>{getDisplayType(f)}</span>
             </div>
           ))
+        )}
+
+        {/* Línea divisoria si hay métodos */}
+        {visibleMethods.length > 0 && (
+          <div style={{ 
+            height: "2px", 
+            background: "#444", 
+            margin: "12px 0", 
+            borderRadius: "1px" 
+          }} />
+        )}
+
+        {/* Métodos (solo en UML) */}
+        {visibleMethods.length > 0 && (
+          <>
+            {visibleMethods.map((f: Field) => (
+              <div key={f.id} style={{ 
+                fontSize: 11, 
+                margin: "4px 0", 
+                padding: "4px 6px", 
+                background: "#2d2416", 
+                borderRadius: 4, 
+                borderLeft: "3px solid #f39c12",
+                color: "#f1c40f",
+                fontFamily: "monospace"
+              }}>
+                {f.name}
+              </div>
+            ))}
+          </>
         )}
       </div>
 

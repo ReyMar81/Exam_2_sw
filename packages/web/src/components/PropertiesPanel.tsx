@@ -19,7 +19,6 @@ interface PropertiesPanelProps {
 // Tipos de datos PostgreSQL comunes
 const DATA_TYPES = [
   "VARCHAR(255)",
-  "VARCHAR(100)",
   "TEXT",
   "INT",
   "BIGINT",
@@ -27,6 +26,7 @@ const DATA_TYPES = [
   "BIGSERIAL",
   "BOOLEAN",
   "DATE",
+  "TIME",
   "TIMESTAMP",
   "TIMESTAMPTZ",
   "DECIMAL(10,2)",
@@ -120,8 +120,18 @@ export default function PropertiesPanel({
       nullable: true,
       references: null,
       relationType: undefined, // 🆕 Inicializar relationType
+      isMethod: false, // Es un atributo regular
     };
     updateTable("fields", [...table.fields, newField]);
+  };
+
+  const addMethod = () => {
+    const newMethod: Field = {
+      id: Date.now(),
+      name: "nuevoMetodo()",
+      isMethod: true, // Es un método
+    };
+    updateTable("fields", [...table.fields, newMethod]);
   };
 
   const removeField = (i: number) => {
@@ -222,8 +232,8 @@ export default function PropertiesPanel({
         />
       </div>
 
-      {/* Lista de campos */}
-      <div style={{ marginBottom: 16 }}>
+      {/* Sección de Atributos */}
+      <div style={{ marginBottom: 24 }}>
         <div style={{
           display: "flex",
           justifyContent: "space-between",
@@ -236,7 +246,7 @@ export default function PropertiesPanel({
             opacity: 0.8,
             letterSpacing: "0.5px"
           }}>
-            CAMPOS ({table.fields.length})
+            📦 ATRIBUTOS ({table.fields.filter((f: Field) => !f.isMethod).length})
           </label>
           <button
             onClick={addField}
@@ -254,25 +264,28 @@ export default function PropertiesPanel({
             onMouseEnter={(e) => e.currentTarget.style.background = "#7c8ef0"}
             onMouseLeave={(e) => e.currentTarget.style.background = "#667eea"}
           >
-            ➕ Agregar Campo
+            ➕ Agregar Atributo
           </button>
         </div>
 
-        {table.fields.length === 0 ? (
+        {table.fields.filter((f: Field) => !f.isMethod).length === 0 ? (
           <div style={{
             textAlign: "center",
-            padding: "32px 16px",
+            padding: "24px 16px",
             background: "#252525",
             borderRadius: 8,
             border: "2px dashed #333"
           }}>
-            <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.3 }}>📝</div>
-            <p style={{ margin: 0, fontSize: 12, opacity: 0.6 }}>
-              No hay campos. Agrega uno para empezar.
+            <div style={{ fontSize: 28, marginBottom: 6, opacity: 0.3 }}>📝</div>
+            <p style={{ margin: 0, fontSize: 11, opacity: 0.6 }}>
+              No hay atributos. Agrega uno para empezar.
             </p>
           </div>
         ) : (
-          table.fields.map((f: Field, i: number) => (
+          table.fields
+            .map((f: Field, i: number) => ({ field: f, originalIndex: i }))
+            .filter(({ field }: { field: Field }) => !field.isMethod)
+            .map(({ field: f, originalIndex: i }: { field: Field, originalIndex: number }) => (
             <div
               key={f.id}
               style={{
@@ -667,6 +680,135 @@ export default function PropertiesPanel({
                   🗑 Eliminar
                 </button>
               </div>
+            </div>
+          ))
+        )}
+      </div>
+
+      {/* Sección de Métodos */}
+      <div style={{ marginBottom: 16 }}>
+        <div style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          marginBottom: 12
+        }}>
+          <label style={{
+            fontSize: 11,
+            fontWeight: 600,
+            opacity: 0.8,
+            letterSpacing: "0.5px"
+          }}>
+            ⚙️ MÉTODOS ({table.fields.filter((f: Field) => f.isMethod).length})
+          </label>
+          <button
+            onClick={addMethod}
+            style={{
+              background: "#f39c12",
+              border: "none",
+              color: "#fff",
+              padding: "6px 12px",
+              cursor: "pointer",
+              borderRadius: 4,
+              fontSize: 11,
+              fontWeight: 600,
+              transition: "all 0.2s"
+            }}
+            onMouseEnter={(e) => e.currentTarget.style.background = "#f1c40f"}
+            onMouseLeave={(e) => e.currentTarget.style.background = "#f39c12"}
+          >
+            ➕ Agregar Método
+          </button>
+        </div>
+
+        {table.fields.filter((f: Field) => f.isMethod).length === 0 ? (
+          <div style={{
+            textAlign: "center",
+            padding: "24px 16px",
+            background: "#252525",
+            borderRadius: 8,
+            border: "2px dashed #333"
+          }}>
+            <div style={{ fontSize: 28, marginBottom: 6, opacity: 0.3 }}>⚙️</div>
+            <p style={{ margin: 0, fontSize: 11, opacity: 0.6 }}>
+              No hay métodos. (Solo visible en vista UML)
+            </p>
+          </div>
+        ) : (
+          table.fields
+            .map((f: Field, i: number) => ({ field: f, originalIndex: i }))
+            .filter(({ field }: { field: Field }) => field.isMethod)
+            .map(({ field: f, originalIndex: i }: { field: Field, originalIndex: number }) => (
+            <div
+              key={f.id}
+              style={{
+                background: "#2d2416",
+                padding: 12,
+                borderRadius: 8,
+                marginBottom: 12,
+                border: "1px solid #f39c12",
+                transition: "border-color 0.2s"
+              }}
+              onMouseEnter={(e) => e.currentTarget.style.borderColor = "#f1c40f"}
+              onMouseLeave={(e) => e.currentTarget.style.borderColor = "#f39c12"}
+            >
+              {/* Nombre del método */}
+              <div style={{ marginBottom: 8 }}>
+                <label style={{
+                  display: "block",
+                  fontSize: 10,
+                  marginBottom: 4,
+                  opacity: 0.6
+                }}>
+                  Método
+                </label>
+                <input
+                  value={f.name}
+                  onChange={(e) => updateField(i, "name", e.target.value)}
+                  placeholder="nuevoMetodo()"
+                  style={{
+                    width: "100%",
+                    background: "#1f1f1f",
+                    color: "#f1c40f",
+                    border: "1px solid #f39c12",
+                    padding: "8px",
+                    borderRadius: 4,
+                    fontSize: 12,
+                    fontFamily: "monospace",
+                    outline: "none",
+                    transition: "border-color 0.2s"
+                  }}
+                  onFocus={(e) => e.currentTarget.style.borderColor = "#f1c40f"}
+                  onBlur={(e) => e.currentTarget.style.borderColor = "#f39c12"}
+                />
+              </div>
+
+              {/* Botón eliminar */}
+              <button
+                onClick={() => removeField(i)}
+                style={{
+                  width: "100%",
+                  background: "transparent",
+                  border: "1px solid #e74c3c",
+                  color: "#e74c3c",
+                  padding: "6px",
+                  borderRadius: 4,
+                  cursor: "pointer",
+                  fontSize: 10,
+                  fontWeight: 600,
+                  transition: "all 0.2s"
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.background = "#e74c3c";
+                  e.currentTarget.style.color = "#fff";
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.background = "transparent";
+                  e.currentTarget.style.color = "#e74c3c";
+                }}
+              >
+                🗑 Eliminar Método
+              </button>
             </div>
           ))
         )}

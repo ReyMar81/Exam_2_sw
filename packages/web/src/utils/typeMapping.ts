@@ -70,6 +70,49 @@ export function sqlToUmlType(sqlType: string): string {
 }
 
 /**
+ * Convierte un tipo UML a su equivalente SQL (para normalización)
+ * Útil cuando la IA detecta tipos UML en imágenes
+ */
+export function umlToSqlType(umlType: string): string {
+  const normalizedType = umlType.trim();
+  const lowerType = normalizedType.toLowerCase();
+  
+  // Mapeo inverso: UML → SQL
+  const UML_TO_SQL_MAP: Record<string, string> = {
+    "string": "VARCHAR(255)",
+    "integer": "INT",
+    "int": "INT",
+    "long": "BIGINT",
+    "boolean": "BOOLEAN",
+    "bool": "BOOLEAN",
+    "float": "DECIMAL(10,2)",
+    "double": "DOUBLE",
+    "date": "DATE",
+    "datetime": "TIMESTAMP",
+    "time": "TIME",
+    "object": "JSONB",
+  };
+  
+  // Si está en el mapa, retornar el tipo SQL
+  if (UML_TO_SQL_MAP[lowerType]) {
+    return UML_TO_SQL_MAP[lowerType];
+  }
+  
+  // Si ya es un tipo SQL válido, retornarlo tal cual
+  const validSqlTypes = ["VARCHAR", "INT", "BIGINT", "SERIAL", "BIGSERIAL", "TEXT", 
+                         "BOOLEAN", "DECIMAL", "NUMERIC", "FLOAT", "DOUBLE", "REAL",
+                         "DATE", "TIMESTAMP", "TIME", "DATETIME", "UUID", "JSON", "JSONB"];
+  
+  const upperType = normalizedType.toUpperCase();
+  if (validSqlTypes.some(sqlType => upperType.startsWith(sqlType))) {
+    return normalizedType;
+  }
+  
+  // Por defecto, asumir que es texto
+  return "VARCHAR(255)";
+}
+
+/**
  * Verifica si un campo es una FK por su estructura
  */
 export function isForeignKeyField(field: any): boolean {

@@ -14,7 +14,7 @@ export interface Multiplicities {
  */
 export function getMultiplicitiesFromRelationType(
   relationType: string, 
-  customMultiplicity?: "1-1" | "1-N"
+  customMultiplicity?: "1-1" | "1-N" | "N-N"
 ): Multiplicities {
   switch (relationType) {
     case "1-1":
@@ -52,6 +52,11 @@ export function getMultiplicitiesFromRelationType(
           sourceMultiplicity: "1",
           targetMultiplicity: "*",
         };
+      } else if (customMultiplicity === "N-N") {
+        return {
+          sourceMultiplicity: "*",
+          targetMultiplicity: "*",
+        };
       }
       return {
         sourceMultiplicity: "1",
@@ -70,6 +75,7 @@ export function getMultiplicitiesFromRelationType(
           targetMultiplicity: "*",
         };
       }
+      // AGGREGATION no soporta N-N en UML 2.5, usar por defecto 1-N
       return {
         sourceMultiplicity: "1",
         targetMultiplicity: "*",
@@ -87,6 +93,7 @@ export function getMultiplicitiesFromRelationType(
           targetMultiplicity: "1..*",
         };
       }
+      // COMPOSITION no soporta N-N en UML 2.5, usar por defecto 1-N
       return {
         sourceMultiplicity: "1",
         targetMultiplicity: "1..*",

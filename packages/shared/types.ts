@@ -41,7 +41,7 @@ export enum RelationType {
 export interface Field {
   id: string | number;
   name: string;
-  type: string;
+  type?: string; // Opcional para métodos
   isPrimary?: boolean;
   isForeign?: boolean;
   nullable?: boolean;
@@ -50,6 +50,7 @@ export interface Field {
   relationType?: string;
   unique?: boolean;
   defaultValue?: string;
+  isMethod?: boolean; // 🆕 Indica si es un método (para UML)
   // 🆕 UML 2.5: Comportamiento de CASCADE
   onDelete?: "CASCADE" | "SET NULL" | "RESTRICT" | "NO ACTION";
   onUpdate?: "CASCADE" | "SET NULL" | "RESTRICT" | "NO ACTION";

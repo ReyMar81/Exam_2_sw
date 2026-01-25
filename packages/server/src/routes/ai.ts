@@ -11,6 +11,49 @@ import {
 const router = Router();
 
 /**
+ * Normaliza tipos UML a tipos SQL
+ * Útil cuando la IA detecta tipos UML en imágenes
+ */
+function normalizeTypeToSQL(type: string): string {
+  const normalizedType = type.trim();
+  const lowerType = normalizedType.toLowerCase();
+  
+  // Mapeo UML → SQL
+  const UML_TO_SQL: Record<string, string> = {
+    "string": "VARCHAR(255)",
+    "integer": "INT",
+    "int": "INT",
+    "long": "BIGINT",
+    "boolean": "BOOLEAN",
+    "bool": "BOOLEAN",
+    "float": "DECIMAL(10,2)",
+    "double": "DOUBLE",
+    "date": "DATE",
+    "datetime": "TIMESTAMP",
+    "time": "TIME",
+    "object": "JSONB",
+  };
+  
+  // Si está en el mapa, retornar SQL
+  if (UML_TO_SQL[lowerType]) {
+    return UML_TO_SQL[lowerType];
+  }
+  
+  // Si ya es SQL válido, retornar tal cual
+  const validSqlTypes = ["VARCHAR", "INT", "BIGINT", "SERIAL", "BIGSERIAL", "TEXT", 
+                         "BOOLEAN", "DECIMAL", "NUMERIC", "FLOAT", "DOUBLE", "REAL",
+                         "DATE", "TIMESTAMP", "TIME", "DATETIME", "UUID", "JSON", "JSONB"];
+  
+  const upperType = normalizedType.toUpperCase();
+  if (validSqlTypes.some(sqlType => upperType.startsWith(sqlType))) {
+    return normalizedType;
+  }
+  
+  // Por defecto, VARCHAR
+  return "VARCHAR(255)";
+}
+
+/**
  * POST /api/ai/parse-intent
  * Endpoint para parsear prompts de lenguaje natural usando IA
  * 
@@ -59,6 +102,23 @@ router.post("/parse-intent", async (req, res) => {
 
     // Llamar al servicio de IA
     const result = await parseUserIntent(prompt);
+
+    // 🔧 Post-procesamiento: Normalizar tipos UML a SQL
+    result.actions.forEach((action: any) => {
+      if (action.type === "CreateTable" && action.fields) {
+        action.fields.forEach((field: any) => {
+          // Solo normalizar si no es un método
+          if (!field.isMethod && field.type) {
+            const originalType = field.type;
+            const normalizedType = normalizeTypeToSQL(field.type);
+            if (originalType !== normalizedType) {
+              console.log(`🔧 [Type Normalization] '${action.name}.${field.name}': ${originalType} → ${normalizedType}`);
+              field.type = normalizedType;
+            }
+          }
+        });
+      }
+    });
 
     // Validar acciones generadas
     const validation = validateActions(result.actions);
@@ -203,6 +263,23 @@ router.post("/parse-image", async (req, res) => {
 
     // Llamar al servicio de IA con visión
     const result = await parseImageIntent(imageBase64);
+
+    // 🔧 Post-procesamiento: Normalizar tipos UML a SQL
+    result.actions.forEach((action: any) => {
+      if (action.type === "CreateTable" && action.fields) {
+        action.fields.forEach((field: any) => {
+          // Solo normalizar si no es un método
+          if (!field.isMethod && field.type) {
+            const originalType = field.type;
+            const normalizedType = normalizeTypeToSQL(field.type);
+            if (originalType !== normalizedType) {
+              console.log(`🔧 [Type Normalization] '${action.name}.${field.name}': ${originalType} → ${normalizedType}`);
+              field.type = normalizedType;
+            }
+          }
+        });
+      }
+    });
 
     // 🔧 Post-procesamiento: Agregar campo id por defecto a tablas vacías
     result.actions.forEach((action: any) => {

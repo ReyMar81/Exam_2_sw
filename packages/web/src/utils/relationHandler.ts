@@ -236,3 +236,96 @@ export function updateFKRelation(
     setEdges(filteredEdges);
   }
 }
+
+/**
+ * Elimina campos FK generados automáticamente cuando se elimina una relación (edge)
+ * @param edge - El edge que se está eliminando
+ * @param nodes - Array de nodos actual
+ * @param setNodes - Función para actualizar nodos
+ * @returns true si se eliminó algún campo FK
+ */
+export function removeFKFieldsFromEdge(
+  edge: Edge,
+  nodes: Node<TableData>[],
+  setNodes: React.Dispatch<React.SetStateAction<Node<TableData>[]>>
+): boolean {
+  let fieldsRemoved = false;
+  
+  // Obtener información del edge
+  const sourceNodeId = edge.source;
+  const targetNodeId = edge.target;
+  const relationType = edge.data?.relationType;
+  const targetFieldName = edge.data?.targetField;
+  const sourceFieldName = edge.data?.sourceField;
+  
+  console.log(`🗑️ [FK Cleanup] Removing FK fields for edge: ${edge.id}`);
+  console.log(`   Source: ${sourceNodeId}, Target: ${targetNodeId}`);
+  console.log(`   Relation: ${relationType}, Target Field: ${targetFieldName}`);
+  
+  // Actualizar nodos eliminando campos FK relacionados
+  setNodes((currentNodes) => {
+    return currentNodes.map((node) => {
+      // Verificar si este nodo es parte de la relación eliminada
+      if (node.id !== sourceNodeId && node.id !== targetNodeId) {
+        return node;
+      }
+      
+      // Filtrar campos FK que fueron creados por esta relación
+      const updatedFields = node.data.fields.filter((field) => {
+        // Si el campo no es FK, mantenerlo
+        if (!field.isForeign) return true;
+        
+        // Para el nodo target: eliminar FK si coincide con targetFieldName
+        if (node.id === targetNodeId && field.name === targetFieldName) {
+          console.log(`   ✂️ Removing FK field "${field.name}" from target node`);
+          fieldsRemoved = true;
+          return false;
+        }
+        
+        // Para el nodo source: eliminar FK si coincide con sourceFieldName (menos común)
+        if (node.id === sourceNodeId && field.name === sourceFieldName && field.isForeign) {
+          console.log(`   ✂️ Removing FK field "${field.name}" from source node`);
+          fieldsRemoved = true;
+          return false;
+        }
+        
+        // Para relaciones especiales, verificar por referencias
+        const sourceNode = currentNodes.find(n => n.id === sourceNodeId);
+        const targetNode = currentNodes.find(n => n.id === targetNodeId);
+        
+        if (sourceNode && targetNode) {
+          // Si el campo FK referencia a alguna de las tablas en la relación eliminada
+          const referencesSource = field.references === sourceNode.data.name;
+          const referencesTarget = field.references === targetNode.data.name;
+          
+          if ((node.id === targetNodeId && referencesSource) || 
+              (node.id === sourceNodeId && referencesTarget)) {
+            // Verificar que el campo tenga el mismo tipo de relación
+            if (field.relationType === relationType || !field.relationType) {
+              console.log(`   ✂️ Removing FK field "${field.name}" (references ${field.references})`);
+              fieldsRemoved = true;
+              return false;
+            }
+          }
+        }
+        
+        return true;
+      });
+      
+      // Si se modificaron los campos, retornar nodo actualizado
+      if (updatedFields.length !== node.data.fields.length) {
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            fields: updatedFields
+          }
+        };
+      }
+      
+      return node;
+    });
+  });
+  
+  return fieldsRemoved;
+}

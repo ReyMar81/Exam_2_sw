@@ -26,7 +26,9 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
   } => {
     const data = node.data as TableData;
     const tableName = (data.name || data.label || "tabla_sin_nombre").toLowerCase().replace(/\s+/g, '_');
-    const fields = data.fields || [];
+    
+    // 🚫 Filtrar métodos (isMethod = true) ya que no son campos de BD
+    const fields = (data.fields || []).filter(f => !f.isMethod);
 
     // 🔍 Buscar relaciones de HERENCIA donde esta tabla es la hija (source)
     const inheritanceEdges = edges.filter(edge => {
@@ -84,26 +86,26 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
       if (field.isPrimary) {
         primaryKeys.push(columnName);
         
-        // 🆕 HERENCIA: Si hay herencia y este campo es PK, verificar si debe ser FK al padre
+        // 🆕 HERENCIA: El PK del hijo ES FK al padre (Strategy Pattern en SQL)
+        // En herencia, el hijo siempre referencia al padre por su PK
         if (hasInheritance) {
           inheritanceEdges.forEach(edge => {
             const targetNode = tableNodes.find(n => n.id === edge.target);
             const parentTableName = (targetNode?.data.name || targetNode?.data.label || "").toLowerCase().replace(/\s+/g, '_');
             const parentPK = targetNode?.data.fields?.find((f: Field) => f.isPrimary);
-            const parentPKName = (parentPK?.name || 'id').toLowerCase();
+            const parentPKName = (parentPK?.name || 'id').toLowerCase().replace(/\s+/g, '_');
             
-            // El PK del hijo ES el FK al padre (mismo campo)
-            if (columnName === parentPKName) {
-              foreignKeys.push({
-                field: columnName,
-                references: parentTableName,
-                referencesField: parentPKName,
-                onDelete: edge.data?.onDelete || "CASCADE",
-                onUpdate: edge.data?.onUpdate || "CASCADE",
-                relationType: "INHERITANCE"
-              });
-              referencedTables.push(parentTableName);
-            }
+            // SIEMPRE crear FK de herencia: PK hijo → PK padre
+            // Esto permite que el hijo "sea" el padre (IS-A relationship)
+            foreignKeys.push({
+              field: columnName,
+              references: parentTableName,
+              referencesField: parentPKName,
+              onDelete: "CASCADE", // Herencia siempre CASCADE
+              onUpdate: "CASCADE",
+              relationType: "INHERITANCE"
+            });
+            referencedTables.push(parentTableName);
           });
         }
         
@@ -121,11 +123,20 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
         
         const refTable = field.references.toLowerCase().replace(/\s+/g, '_');
         const refField = field.referencesField || 'id';
+        
+        // 🎯 Determinar ON DELETE según tipo de relación
+        let onDeleteAction = "RESTRICT"; // DEFAULT: No permitir eliminar si hay dependencias
+        if (field.relationType === 'COMPOSITION') {
+          onDeleteAction = "CASCADE"; // Composición: eliminar hijos automáticamente
+        } else if (field.relationType === 'AGGREGATION' || field.relationType === 'ASSOCIATION') {
+          onDeleteAction = "RESTRICT"; // Agregación/Asociación: proteger referencias
+        }
+        
         foreignKeys.push({
           field: columnName,
           references: refTable,
           referencesField: refField,
-          onDelete: field.onDelete || "CASCADE",
+          onDelete: field.onDelete || onDeleteAction,
           onUpdate: field.onUpdate || "CASCADE",
           relationType: field.relationType
         });
@@ -147,7 +158,27 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
     foreignKeys.forEach(fk => {
       const onDelete = fk.onDelete || "CASCADE";
       const onUpdate = fk.onUpdate || "CASCADE";
-      const refField = fk.referencesField || 'id';
+      
+      // 🔍 Buscar el nombre EXACTO de la PK en la tabla referenciada
+      const referencedNode = tableNodes.find(n => {
+        const nodeName = (n.data.name || n.data.label || "").toLowerCase().replace(/\s+/g, '_');
+        return nodeName === fk.references;
+      });
+      
+      let refField = 'id'; // default
+      if (referencedNode) {
+        // Buscar la PK real en la tabla referenciada
+        const pkField = referencedNode.data.fields?.find((f: Field) => f.isPrimary && !f.isMethod);
+        if (pkField) {
+          // Usar el nombre EXACTO de la columna PK (normalizado a minúsculas)
+          refField = pkField.name.toLowerCase().replace(/\s+/g, '_');
+        }
+      }
+      
+      // Si había un referencesField específico, usarlo (normalizado)
+      if (fk.referencesField) {
+        refField = fk.referencesField.toLowerCase().replace(/\s+/g, '_');
+      }
       
       // Comentario con tipo de relación UML 2.5 y sus características
       let comment = '';
@@ -260,7 +291,7 @@ export function generateSQL(nodes: Node[], edges: Edge[]): string {
   }
 
   // === COMENTARIOS FINALES ===
-  sql += "\n-- ✅ Script generado según UML 2.5\n";
+  sql += "\n-- ✅ Script generado con exito\n";
 
   return sql;
 }

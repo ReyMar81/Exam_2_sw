@@ -20,11 +20,12 @@ export default function AcceptInvite() {
         
         console.log("✅ [AcceptInvite] Invitation found:", invitation);
         setProjectName(invitation.project.name);
+        setStatus(`✅ Invitación válida`);
 
         if (!user) {
           // Crear usuario temporal VIEWER y mostrar proyecto
-          console.log("�️ [AcceptInvite] No user, entering as guest VIEWER");
-          setStatus(`�️ Accediendo al proyecto "${invitation.project.name}" como invitado...`);
+          console.log("👥 [AcceptInvite] No user, entering as guest VIEWER");
+          setStatus(`👥 Accediendo al proyecto "${invitation.project.name}" como invitado...`);
           
           const guestUser = {
             id: `guest_${Date.now()}`,
@@ -56,10 +57,11 @@ export default function AcceptInvite() {
         }
       } catch (err: any) {
         console.error("❌ [AcceptInvite] Error:", err);
+        console.error("❌ [AcceptInvite] Error details:", err.response?.data);
         if (err.response?.status === 404) {
           setStatus("❌ Invitación no encontrada");
         } else {
-          setStatus("❌ Error al procesar la invitación");
+          setStatus(`❌ Error al procesar la invitación: ${err.message}`);
         }
       }
     };
@@ -67,7 +69,7 @@ export default function AcceptInvite() {
     if (token) {
       loadInvite();
     }
-  }, [token, user]);
+  }, [token]);
 
   return (
     <div

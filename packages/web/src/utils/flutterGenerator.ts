@@ -22,6 +22,8 @@ interface TableMetadata {
   foreignKeys: Field[];
   tableKind: TableKind;
   needsCompositeKey: boolean;
+  parentTable?: string;   // 🎯 Nombre de la tabla padre (para herencia)
+  parentClass?: string;   // 🎯 Nombre de la clase padre (para herencia)
 }
 
 /**
@@ -45,7 +47,7 @@ export async function generateFlutterProject(
   const baseDir = `${sanitizedProjectName}_flutter`;
 
   // Analizar TODAS las tablas
-  const allTablesMetadata = analyzeTablesMetadata(tableNodes);
+  const allTablesMetadata = analyzeTablesMetadata(tableNodes, model.edges);
   
   // Filtrar: solo generar CRUD para ENTITY y JOIN_ENRICHED (NO para JOIN_PURE)
   const tablesMetadata = allTablesMetadata.filter(t => shouldGenerateCRUD(t.tableKind));
@@ -67,7 +69,7 @@ export async function generateFlutterProject(
   tablesMetadata.forEach(table => {
     zip.file(
       `${baseDir}/lib/models/${table.tableName}_model.dart`,
-      generateModel(table)
+      generateModel(table, tablesMetadata)
     );
   });
 
@@ -81,7 +83,7 @@ export async function generateFlutterProject(
   tablesMetadata.forEach(table => {
     zip.file(
       `${baseDir}/lib/providers/${table.tableName}_provider.dart`,
-      generateProvider(table)
+      generateProvider(table, tablesMetadata)
     );
   });
 
@@ -93,7 +95,7 @@ export async function generateFlutterProject(
     );
     zip.file(
       `${baseDir}/lib/screens/${table.tableName}_form_screen.dart`,
-      generateFormScreen(table)
+      generateFormScreen(table, tablesMetadata)
     );
   });
 
@@ -101,14 +103,37 @@ export async function generateFlutterProject(
 }
 
 /**
- * Analiza metadata de tablas usando la lógica centralizada de clasificación
+ * Analiza metadata de tablas con DETECCIÓN DIRECTA DE HERENCIA desde edges
+ * (igual que Spring Boot - sin intentar propagar relationType a campos)
  */
-function analyzeTablesMetadata(nodes: Node[]): TableMetadata[] {
+function analyzeTablesMetadata(nodes: Node[], edges: Edge[]): TableMetadata[] {
+  // 🎯 Construir un mapa de herencias directamente desde los edges (COMO SPRING BOOT)
+  const inheritanceMap = new Map<string, string>(); // childTable -> parentTable
+  
+  edges.forEach(edge => {
+    const edgeData = edge.data as any;
+    
+    if (edgeData?.relationType === 'INHERITANCE') {
+      // En UML: la flecha apunta al padre (source hereda de target)
+      const sourceNode = nodes.find(n => n.id === edge.source);
+      const targetNode = nodes.find(n => n.id === edge.target);
+      
+      if (sourceNode && targetNode) {
+        const sourceTable = ((sourceNode.data as any).name || '').toLowerCase().replace(/\s+/g, '_');
+        const targetTable = ((targetNode.data as any).name || '').toLowerCase().replace(/\s+/g, '_');
+        inheritanceMap.set(sourceTable, targetTable);
+        console.log(`🔺 [Flutter Inheritance] ${sourceTable} extends ${targetTable}`);
+      }
+    }
+  });
+  
   return nodes.map(node => {
     const data = node.data as TableData;
     const tableName = (data.name || data.label || "tabla").toLowerCase().replace(/\s+/g, '_');
     const className = toPascalCase(tableName);
-    const fields = data.fields || [];
+    
+    // 🚫 Filtrar métodos (isMethod = true) ya que no son campos de BD
+    let fields = (data.fields || []).filter(f => !f.isMethod);
     
     // Usar clasificación centralizada
     const classification = classifyTable(fields);
@@ -117,6 +142,16 @@ function analyzeTablesMetadata(nodes: Node[]): TableMetadata[] {
     const tableKind = classification.kind;
     const needsCompKey = needsCompositeKey(classification);
 
+    // 🎯 HERENCIA: Detectar desde el mapa (como Spring Boot)
+    let parentTable: string | undefined;
+    let parentClass: string | undefined;
+    
+    if (inheritanceMap.has(tableName)) {
+      parentTable = inheritanceMap.get(tableName);
+      parentClass = toPascalCase(parentTable!);
+      console.log(`✅ [Flutter Inheritance] ${className} extends ${parentClass}`);
+    }
+
     return {
       tableName,
       className,
@@ -124,7 +159,9 @@ function analyzeTablesMetadata(nodes: Node[]): TableMetadata[] {
       primaryKey,
       foreignKeys,
       tableKind,
-      needsCompositeKey: needsCompKey
+      needsCompositeKey: needsCompKey,
+      parentTable,      // 🎯 Agregar info de herencia al metadata
+      parentClass       // 🎯 Agregar info de herencia al metadata
     };
   });
 }
@@ -379,52 +416,74 @@ ${routes}
 }
 
 /**
- * Genera modelo Dart
+ * Genera modelo Dart con HERENCIA REAL usando extends (como Spring Boot)
  */
-function generateModel(table: TableMetadata): string {
-  // 🎯 Detectar herencia (si hay FK con relationType = INHERITANCE)
-  const inheritanceFK = table.fields.find(f => f.isForeign && f.relationType === 'INHERITANCE');
-  const parentClass = inheritanceFK ? toPascalCase(inheritanceFK.references || '') : null;
+function generateModel(table: TableMetadata, allTables: TableMetadata[]): string {
+  console.log(`\n🏗️ [Flutter Model] ========== GENERATING ${table.className} ==========`);
   
-  const fields = table.fields.map(field => {
-    const dartType = mapSqlToDartType(field.type);
+  // 🎯 Si hereda, usar extends (como Spring Boot)
+  let parentTableMetadata: TableMetadata | undefined;
+  let parentFields: Field[] = [];
+  
+  if (table.parentTable) {
+    parentTableMetadata = allTables.find(t => t.tableName === table.parentTable);
+    if (parentTableMetadata) {
+      parentFields = parentTableMetadata.fields.filter(f => !f.isMethod);
+      console.log(`🔗 [Flutter Model] ${table.className} extends ${table.parentClass}`);
+      console.log(`📊 [Flutter Model] Parent fields: ${parentFields.map(f => f.name).join(', ')}`);
+    }
+  }
+  
+  // 🎯 Campos propios (sin PK si hereda, ya que se hereda del padre)
+  let ownFields = table.fields.filter(f => !f.isMethod);
+  
+  // Si hereda, excluir PK propio y FK de herencia
+  if (table.parentTable) {
+    ownFields = ownFields.filter(f => {
+      // Excluir PK (se hereda del padre)
+      if (f.isPrimary) {
+        console.log(`⏭️ [Flutter Model] Skipping PK ${f.name} (inherited from ${table.parentClass})`);
+        return false;
+      }
+      
+      // Excluir FK de herencia
+      if (f.isForeign || f.name.toLowerCase().endsWith('_id')) {
+        const referencedTable = f.references ? 
+          f.references.toLowerCase().replace(/\s+/g, '_') :
+          f.name.toLowerCase().replace(/_id$/i, '');
+        
+        if (referencedTable === table.parentTable) {
+          console.log(`⏭️ [Flutter Model] Skipping inheritance FK ${f.name} (handled by extends)`);
+          return false;
+        }
+      }
+      
+      return true;
+    });
+  }
+  
+  console.log(`📊 [Flutter Model] Own fields: ${ownFields.map(f => f.name).join(', ')}`);
+  
+  // Generar definición de campos propios
+  const fields = ownFields.map(field => {
+    const dartType = mapSqlToDartType(field.type || 'String');
     const isIdField = field.name.toLowerCase() === 'id' && field.isPrimary;
     const isForeignKey = field.isForeign || field.name.toLowerCase().endsWith('_id');
-    const relationType = field.relationType || '';
     
-    // 🎯 UML 2.5: Ajustar nullable según tipo de relación
     let nullable = '';
     let isNullable = false;
     
     if (isIdField) {
       nullable = '?';
       isNullable = true;
-    } else if (relationType === 'INHERITANCE') {
-      // △ Herencia: En Flutter mantenemos FK explícito (no extends)
-      nullable = '';
-      isNullable = false;
-    } else if (relationType === 'COMPOSITION') {
-      // ◆ Composición: NUNCA nullable (ciclo de vida dependiente)
-      nullable = '';
-      isNullable = false;
-    } else if (relationType === 'AGGREGATION') {
-      // ◇ Agregación: SIEMPRE nullable (existencia independiente)
+    } else if (isForeignKey) {
       nullable = '?';
       isNullable = true;
-    } else if (isForeignKey && table.tableKind === 'ENTITY') {
-      // FKs normales en entidades son opcionales
-      nullable = '?';
-      isNullable = true;
-    } else if (table.tableKind !== 'ENTITY' && isForeignKey) {
-      // FKs en tablas JOIN NO son nullable
-      nullable = '';
-      isNullable = false;
     } else if (field.nullable) {
       nullable = '?';
       isNullable = true;
     }
     
-    // Required: solo para campos no-nullable y no-primaryKey
     const required = !isNullable && !field.isPrimary ? 'required ' : '';
     
     return {
@@ -433,57 +492,172 @@ function generateModel(table: TableMetadata): string {
       required: required,
       originalName: field.name,
       isPrimary: field.isPrimary,
-      isForeign: field.isForeign || field.name.toLowerCase().endsWith('_id'),
+      isForeign: isForeignKey,
       isNullable: isNullable
     };
-  }).filter(f => f !== null); // Filtrar campos null (como INHERITANCE FK)
-
+  });
+  
+  console.log(`📋 [Flutter Model] Final own fields: ${fields.map(f => `${f.name}:${f.type}`).join(', ')}`);
+  
+  // 🎯 Import de la clase padre si hereda
+  let imports = '';
+  if (table.parentClass && table.parentTable) {
+    imports = `import '${table.parentTable}_model.dart';\n\n`;
+    console.log(`📦 [Flutter Model] Adding import: ${table.parentTable}_model.dart`);
+  }
+  
+  // Generar clase
+  const extendsClause = table.parentClass ? ` extends ${table.parentClass}` : '';
   const classFields = fields.map(f => `  final ${f.type} ${f.name};`).join('\n');
   
-  const constructorParams = fields.map(f => {
-    return `${f.required}this.${f.name}`;
-  }).join(', ');
-
-  const fromJsonFields = fields.map(f => {
-    const baseType = f.type.replace('?', '');
+  // Constructor - si hereda, pasar parámetros al padre explícitamente
+  let constructorParams = '';
+  let superCall = '';
+  
+  if (table.parentClass && parentFields.length > 0) {
+    // Parámetros del padre (declarados pero no como this.field porque van al super)
+    const parentParams = parentFields.map(pf => {
+      const dartType = mapSqlToDartType(pf.type || 'String');
+      const nullable = pf.isPrimary || pf.isForeign || pf.nullable ? '?' : '';
+      const fieldName = toCamelCase(pf.name);
+      return `${dartType}${nullable} ${fieldName}`;
+    }).join(', ');
+    
+    // Parámetros propios
+    const ownParams = fields.map(f => `${f.required}this.${f.name}`).join(', ');
+    
+    constructorParams = parentParams + (ownParams ? ', ' + ownParams : '');
+    
+    // Llamada al constructor del padre con PARÁMETROS NOMBRADOS
+    const superArgs = parentFields.map(pf => {
+      const fieldName = toCamelCase(pf.name);
+      return `${fieldName}: ${fieldName}`;
+    }).join(', ');
+    superCall = ` : super(${superArgs})`;
+  } else {
+    // Sin herencia
+    constructorParams = fields.map(f => `${f.required}this.${f.name}`).join(', ');
+  }
+  
+  // fromJson - parsear TODOS los campos (padre + propios)
+  const allFieldsForJson = table.parentClass && parentFields.length > 0 
+    ? [...parentFields, ...ownFields]
+    : ownFields;
+  
+  // 🎯 Construir mapa de FKs para usar nombres correctos en JSON
+  const fkJsonKeyMap = new Map<string, string>();
+  allFieldsForJson.forEach(field => {
+    if (field.isForeign && field.references) {
+      const refTableName = field.references.toLowerCase().replace(/\s+/g, '_');
+      const refTable = allTables.find(t => t.tableName === refTableName);
+      if (refTable) {
+        const jsonKey = `${toCamelCase(refTable.tableName)}Id`;
+        fkJsonKeyMap.set(field.name, jsonKey);
+        console.log(`🔧 [Flutter Model] FK ${field.name} → JSON key: "${jsonKey}"`);
+      }
+    }
+  });
+  
+  const fromJsonFields = allFieldsForJson.map(field => {
+    const fieldName = toCamelCase(field.name);
+    // 🎯 Para FKs, usar nombre simplificado (pacienteId) no el nombre completo del campo
+    const jsonKey = fkJsonKeyMap.get(field.name) || toCamelCase(field.name);
+    const baseType = mapSqlToDartType(field.type || 'String');
+    const sqlType = (field.type || '').toUpperCase();
+    
     if (baseType === 'int') {
-      return `      ${f.name}: json['${f.originalName}'] as ${f.type},`;
+      return `      ${fieldName}: json['${jsonKey}'] as int?,`;
     } else if (baseType === 'double') {
-      return `      ${f.name}: (json['${f.originalName}'] as num?)?.toDouble(),`;
+      return `      ${fieldName}: (json['${jsonKey}'] as num?)?.toDouble(),`;
     } else if (baseType === 'bool') {
-      return `      ${f.name}: json['${f.originalName}'] as ${f.type},`;
+      return `      ${fieldName}: json['${jsonKey}'] as bool?,`;
     } else if (baseType === 'DateTime') {
-      return `      ${f.name}: json['${f.originalName}'] != null ? DateTime.parse(json['${f.originalName}']) : null,`;
+      // Si es TIME, parsear como "1970-01-01 HH:mm:ss" o usar el string tal cual
+      if (sqlType.includes('TIME') && !sqlType.includes('DATETIME') && !sqlType.includes('TIMESTAMP')) {
+        return `      ${fieldName}: json['${jsonKey}'] != null ? DateTime.parse('1970-01-01 ' + json['${jsonKey}']) : null,`;
+      } else {
+        return `      ${fieldName}: json['${jsonKey}'] != null ? DateTime.parse(json['${jsonKey}']) : null,`;
+      }
     } else {
-      return `      ${f.name}: json['${f.originalName}'] as ${f.type},`;
+      return `      ${fieldName}: json['${jsonKey}'] as String?,`;
     }
   }).join('\n');
-
-  const toJsonFields = fields.map(f => {
-    if (f.type.includes('DateTime')) {
-      return `      '${f.originalName}': ${f.name}?.toIso8601String(),`;
-    } else {
-      return `      '${f.originalName}': ${f.name},`;
-    }
+  
+  // toJson - Si hereda, usar super.toJson() y agregar campos propios
+  let toJsonBody = '';
+  if (table.parentClass && parentFields.length > 0) {
+    // Con herencia: combinar super.toJson() con campos propios
+    const ownToJsonFields = ownFields.map(field => {
+      const fieldName = toCamelCase(field.name);
+      // 🎯 Para FKs, usar nombre simplificado (pacienteId) no el nombre completo del campo
+      const jsonKey = fkJsonKeyMap.get(field.name) || toCamelCase(field.name);
+      const baseType = mapSqlToDartType(field.type || 'String');
+      const sqlType = (field.type || '').toUpperCase();
+      
+      if (baseType === 'DateTime') {
+        // Si es TIME, formatear solo la hora
+        if (sqlType.includes('TIME') && !sqlType.includes('DATETIME') && !sqlType.includes('TIMESTAMP')) {
+          return `      '${jsonKey}': ${fieldName} != null ? '\${${fieldName}!.hour.toString().padLeft(2, '0')}:\${${fieldName}!.minute.toString().padLeft(2, '0')}:\${${fieldName}!.second.toString().padLeft(2, '0')}' : null,`;
+        } else {
+          return `      '${jsonKey}': ${fieldName}?.toIso8601String(),`;
+        }
+      } else {
+        return `      '${jsonKey}': ${fieldName},`;
+      }
+    }).join('\n');
+    
+    toJsonBody = `    return {
+      ...super.toJson(),
+${ownToJsonFields}
+    };`;
+  } else {
+    // Sin herencia: incluir todos los campos
+    const allToJsonFields = ownFields.map(field => {
+      const fieldName = toCamelCase(field.name);
+      // 🎯 Para FKs, usar nombre simplificado (pacienteId) no el nombre completo del campo
+      const jsonKey = fkJsonKeyMap.get(field.name) || toCamelCase(field.name);
+      const baseType = mapSqlToDartType(field.type || 'String');
+      const sqlType = (field.type || '').toUpperCase();
+      
+      if (baseType === 'DateTime') {
+        // Si es TIME, formatear solo la hora
+        if (sqlType.includes('TIME') && !sqlType.includes('DATETIME') && !sqlType.includes('TIMESTAMP')) {
+          return `      '${jsonKey}': ${fieldName} != null ? '\${${fieldName}!.hour.toString().padLeft(2, '0')}:\${${fieldName}!.minute.toString().padLeft(2, '0')}:\${${fieldName}!.second.toString().padLeft(2, '0')}' : null,`;
+        } else {
+          return `      '${jsonKey}': ${fieldName}?.toIso8601String(),`;
+        }
+      } else {
+        return `      '${jsonKey}': ${fieldName},`;
+      }
+    }).join('\n');
+    
+    toJsonBody = `    return {
+${allToJsonFields}
+    };`;
+  }
+  
+  // copyWith - todos los campos (padre + propios)
+  const copyWithParams = allFieldsForJson.map(f => {
+    const baseType = mapSqlToDartType(f.type || 'String');
+    return `    ${baseType}? ${toCamelCase(f.name)},`;
   }).join('\n');
-
-  // Para copyWith, todos los parámetros son opcionales (nullable)
-  const copyWithParams = fields.map(f => {
-    const baseType = f.type.replace('?', '');
-    return `    ${baseType}? ${f.name},`;
+  
+  const copyWithArgs = allFieldsForJson.map(f => {
+    const fieldName = toCamelCase(f.name);
+    return `      ${fieldName}: ${fieldName} ?? this.${fieldName},`;
   }).join('\n');
-
+  
   // Generar getCompositeKey para tablas que lo necesitan
   let compositeKeyMethod = '';
   if (table.needsCompositeKey && table.foreignKeys.length >= 2) {
     const fkNames = table.foreignKeys.slice(0, 2).map(fk => toCamelCase(fk.name));
     compositeKeyMethod = `\n  String getCompositeKey() => "\${${fkNames[0]}}_\${${fkNames[1]}}";`;
   }
-
-  return `class ${table.className} {
+  
+  return `${imports}class ${table.className}${extendsClause} {
 ${classFields}
 
-  ${table.className}({${constructorParams}});
+  ${table.className}({${constructorParams}})${superCall};
 
   factory ${table.className}.fromJson(Map<String, dynamic> json) {
     return ${table.className}(
@@ -491,17 +665,16 @@ ${fromJsonFields}
     );
   }
 
+  @override
   Map<String, dynamic> toJson() {
-    return {
-${toJsonFields}
-    };
+${toJsonBody}
   }
 
   ${table.className} copyWith({
 ${copyWithParams}
   }) {
     return ${table.className}(
-${fields.map(f => `      ${f.name}: ${f.name} ?? this.${f.name},`).join('\n')}
+${copyWithArgs}
     );
   }${compositeKeyMethod}
 }
@@ -721,7 +894,7 @@ function generateSampleData(table: TableMetadata): any[] {
         // FKs: usar valores válidos (asumimos que existen registros 1 y 2)
         item[field.name] = id;
       } else {
-        const dartType = mapSqlToDartType(field.type);
+        const dartType = mapSqlToDartType(field.type || 'String');
         if (dartType === 'String') {
           item[field.name] = `${field.name}_${id}`;
         } else if (dartType === 'int') {
@@ -742,8 +915,17 @@ function generateSampleData(table: TableMetadata): any[] {
 /**
  * Genera Provider
  */
-function generateProvider(table: TableMetadata): string {
-  const pkField = toCamelCase(table.primaryKey?.name || 'id');
+function generateProvider(table: TableMetadata, allTables: TableMetadata[]): string {
+  // 🎯 Obtener PK correcto (si hereda, usar PK del padre)
+  let pkField = toCamelCase(table.primaryKey?.name || 'id');
+  
+  if (table.parentTable) {
+    const parentMeta = allTables.find(t => t.tableName === table.parentTable);
+    if (parentMeta && parentMeta.primaryKey) {
+      pkField = toCamelCase(parentMeta.primaryKey.name);
+      console.log(`🔑 [Provider] ${table.className} uses PK '${pkField}' from parent`);
+    }
+  }
   
   // Para tablas intermedias, usar clave compuesta
   let findIndexLogic = '';
@@ -867,8 +1049,27 @@ ${deleteMethod}
  * Genera pantalla de lista
  */
 function generateListScreen(table: TableMetadata, allTables: TableMetadata[]): string {
-  const pkField = toCamelCase(table.primaryKey?.name || 'id');
-  const displayFields = table.fields.filter(f => !f.isPrimary).slice(0, 3);
+  // 🎯 Obtener PK correcto (si hereda, usar PK del padre)
+  let pkField = toCamelCase(table.primaryKey?.name || 'id');
+  
+  if (table.parentTable) {
+    const parentMeta = allTables.find(t => t.tableName === table.parentTable);
+    if (parentMeta && parentMeta.primaryKey) {
+      pkField = toCamelCase(parentMeta.primaryKey.name);
+    }
+  }
+  
+  // 🎯 Expandir campos si hereda (igual que en generateModel)
+  let allFields = [...table.fields];
+  if (table.parentTable) {
+    const parentTableMetadata = allTables.find(t => t.tableName === table.parentTable);
+    if (parentTableMetadata) {
+      const parentFields = parentTableMetadata.fields.filter(f => !f.isPrimary && !f.isMethod);
+      allFields = [...parentFields, ...table.fields];
+    }
+  }
+  
+  const displayFields = allFields.filter(f => !f.isPrimary && !f.name.toLowerCase().endsWith('_id')).slice(0, 3);
   const isJoinTable = table.needsCompositeKey;
   
   // Lógica de eliminación
@@ -1124,39 +1325,145 @@ ${drawerItems}
 }
 
 /**
- * Genera pantalla de formulario
+ * Genera pantalla de formulario con dropdowns para FKs
  */
-function generateFormScreen(table: TableMetadata): string {
-  const pkField = toCamelCase(table.primaryKey?.name || 'id');
+function generateFormScreen(table: TableMetadata, allTables: TableMetadata[]): string {
+  // 🎯 Obtener PK correcto (si hereda, usar PK del padre)
+  let pkField = toCamelCase(table.primaryKey?.name || 'id');
+  let pkFieldJson = toCamelCase(table.primaryKey?.name || 'id'); // Para usar en JSON (siempre camelCase)
+  
+  if (table.parentTable) {
+    const parentMeta = allTables.find(t => t.tableName === table.parentTable);
+    if (parentMeta && parentMeta.primaryKey) {
+      pkField = toCamelCase(parentMeta.primaryKey.name);
+      pkFieldJson = toCamelCase(parentMeta.primaryKey.name);
+    }
+  }
+  
   const editableFields = table.fields.filter(f => !f.isPrimary);
   const isJoinTable = table.needsCompositeKey;
   
-  const controllers = editableFields.map(f => 
+  // 🎯 Primero detectar tabla padre para excluir su FK
+  const parentTableName = table.parentTable;
+  
+  // Detectar FKs y sus tablas relacionadas (EXCLUYENDO FK a tabla padre)
+  const foreignKeyFields = editableFields.filter(f => {
+    if (!f.isForeign && !f.name.toLowerCase().endsWith('_id')) {
+      return false; // No es FK
+    }
+    
+    // Obtener tabla referenciada
+    const referencedTableName = f.references ? 
+      f.references.toLowerCase().replace(/\s+/g, '_') : 
+      f.name.toLowerCase().replace(/_id$/i, '');
+    
+    // Excluir si apunta a la tabla padre (es FK de herencia)
+    if (parentTableName && referencedTableName === parentTableName) {
+      console.log(`🔺 [Flutter Form] Skipping inheritance FK ${f.name} pointing to parent ${parentTableName}`);
+      return false;
+    }
+    
+    return true;
+  });
+  
+  const fkTableMap = new Map<string, TableMetadata>();
+  
+  foreignKeyFields.forEach(fk => {
+    const referencedTableName = fk.references ? fk.references.toLowerCase().replace(/\s+/g, '_') : 
+                                 fk.name.toLowerCase().replace(/_id$/i, '');
+    const referencedTable = allTables.find(t => t.tableName === referencedTableName);
+    if (referencedTable) {
+      fkTableMap.set(fk.name, referencedTable);
+    }
+  });
+  
+  // 🎯 HERENCIA: Detectar usando metadata.parentTable (como Spring Boot)
+  // Ya no buscar campo con relationType, usar el parentTable del metadata directamente
+  let parentFields: Field[] = [];
+  let parentTableMetadata: TableMetadata | undefined;
+  
+  console.log(`🔍 [Flutter Form] Checking inheritance for ${table.className}:`, {
+    hasParent: !!table.parentTable,
+    parentTable: table.parentTable,
+    parentClass: table.parentClass
+  });
+  
+  if (table.parentTable) {
+    parentTableMetadata = allTables.find(t => t.tableName === table.parentTable);
+    
+    if (parentTableMetadata) {
+      console.log(`✅ [Flutter Form] Found parent table: ${parentTableMetadata.className}`);
+      // Incluir campos del padre (excepto PK y métodos)
+      parentFields = parentTableMetadata.fields.filter(f => !f.isPrimary && !f.isMethod);
+      console.log(`📋 [Flutter Form] Parent fields: ${parentFields.map(f => f.name).join(', ')}`);
+    } else {
+      console.warn(`⚠️ [Flutter Form] Parent table not found for: ${table.parentTable}`);
+    }
+  } else {
+    console.log(`ℹ️ [Flutter Form] No inheritance detected for ${table.className}`);
+  }
+  
+  // Generar controllers para campos NO-FK propios (los campos del padre se agregan después)
+  const nonFkFields = editableFields.filter(f => !fkTableMap.has(f.name));
+  
+  // 🎯 HERENCIA: Agregar controllers para campos del padre
+  const allNonFkFields = [...parentFields, ...nonFkFields];
+  
+  console.log(`📝 [Flutter Form] Form fields for ${table.className}:`, {
+    parentFieldsCount: parentFields.length,
+    parentFieldNames: parentFields.map(f => f.name),
+    ownFieldsCount: nonFkFields.length,
+    ownFieldNames: nonFkFields.map(f => f.name),
+    totalFields: allNonFkFields.length
+  });
+  
+  const controllers = allNonFkFields.map(f => 
     `  final _${toCamelCase(f.name)}Controller = TextEditingController();`
   ).join('\n');
+  
+  // Generar variables de selección para FKs (excluyendo campos de herencia que ahora no están en editableFields)
+  const fkSelectionVars = foreignKeyFields.map(fk => 
+    `  int? _selected${toPascalCase(fk.name)};`
+  ).join('\n');
 
-  const initState = editableFields.map(f => {
+  // Generar initState para campos no-FK (incluyendo campos del padre)
+  const nonFkInitState = allNonFkFields.map(f => {
     const fieldName = toCamelCase(f.name);
-    const dartType = mapSqlToDartType(f.type);
+    const dartType = mapSqlToDartType(f.type || 'String');
     if (dartType === 'String') {
       return `      _${fieldName}Controller.text = widget.item?.${fieldName} ?? '';`;
     } else {
       return `      _${fieldName}Controller.text = widget.item?.${fieldName}?.toString() ?? '';`;
     }
   }).join('\n');
+  
+  // Generar initState para FKs (inicializar selected) - EXCLUYE INHERITANCE
+  const fkInitState = foreignKeyFields.map(fk => {
+    const fieldName = toCamelCase(fk.name);
+    return `      _selected${toPascalCase(fk.name)} = widget.item?.${fieldName};`;
+  }).join('\n');
+  
+  // Generar carga de datos relacionados
+  const fkLoadCalls = Array.from(fkTableMap.values())
+    .map(t => `      context.read<${t.className}Provider>().fetchAll();`)
+    .join('\n');
+  
+  const initState = [nonFkInitState, fkInitState].filter(s => s).join('\n');
 
-  const dispose = editableFields.map(f => 
+  const dispose = allNonFkFields.map(f => 
     `    _${toCamelCase(f.name)}Controller.dispose();`
   ).join('\n');
 
-  const formFields = editableFields.map(f => {
-    const fieldName = toCamelCase(f.name);
-    const dartType = mapSqlToDartType(f.type);
-    const label = f.name.replace(/_/g, ' ');
+  // 🎯 HERENCIA: Generar función auxiliar para crear campo de texto
+  const generateTextField = (field: Field, isParentField: boolean = false) => {
+    const fieldName = toCamelCase(field.name);
+    const dartType = mapSqlToDartType(field.type || 'String');
+    const label = field.name.replace(/_/g, ' ');
+    const labelSuffix = isParentField ? ' (heredado)' : '';
     
     if (dartType === 'bool') {
       return `          SwitchListTile(
-            title: Text('${label}'),
+            title: Text('${label}${labelSuffix}'),
             value: _${fieldName}Controller.text == 'true',
             onChanged: (value) {
               setState(() {
@@ -1168,7 +1475,7 @@ function generateFormScreen(table: TableMetadata): string {
       return `          TextFormField(
             controller: _${fieldName}Controller,
             decoration: InputDecoration(
-              labelText: '${label}',
+              labelText: '${label}${labelSuffix}',
               border: const OutlineInputBorder(),
             ),
             keyboardType: TextInputType.number,
@@ -1184,7 +1491,7 @@ function generateFormScreen(table: TableMetadata): string {
       return `          TextFormField(
             controller: _${fieldName}Controller,
             decoration: InputDecoration(
-              labelText: '${label}',
+              labelText: '${label}${labelSuffix}',
               border: const OutlineInputBorder(),
             ),
             validator: (value) {
@@ -1193,22 +1500,183 @@ function generateFormScreen(table: TableMetadata): string {
             },
           ),`;
     }
-  }).join('\n          const SizedBox(height: 16),\n');
+  };
+  
+  // Generar campos del padre (si hay herencia)
+  let parentFieldsSection = '';
+  if (parentFields.length > 0 && parentTableMetadata) {
+    const parentFieldsCode = parentFields.map(f => generateTextField(f, true)).join('\n          const SizedBox(height: 16),\n');
+    parentFieldsSection = `          // 🎯 Campos heredados de ${parentTableMetadata.className}
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                Icon(Icons.arrow_upward, color: Colors.blue, size: 20),
+                SizedBox(width: 8),
+                Text(
+                  'Datos de ${parentTableMetadata.className}',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.blue,
+                  ),
+                ),
+              ],
+            ),
+          ),
+${parentFieldsCode}
+          const SizedBox(height: 24),
+          Divider(thickness: 2),
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Row(
+              children: [
+                Icon(Icons.person, color: Colors.deepPurple, size: 20),
+                SizedBox(width: 8),
+                Text(
+                  'Datos específicos de ${table.className}',
+                  style: TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.deepPurple,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+`;
+  }
+  
+  const formFields = editableFields.map(f => {
+    const fieldName = toCamelCase(f.name);
+    const dartType = mapSqlToDartType(f.type || 'String');
+    const label = f.name.replace(/_/g, ' ');
+    const isFK = fkTableMap.has(f.name);
+    
+    // 🎯 FK de herencia ya fueron excluidas en foreignKeyFields, así que no hay que checkear aquí
+    
+    // Si es FK, generar dropdown
+    if (isFK) {
+      const relatedTable = fkTableMap.get(f.name)!;
+      
+      // 🎯 Obtener PK correcto de la tabla relacionada (si hereda, usar PK del padre)
+      let relatedPkField = toCamelCase(relatedTable.primaryKey?.name || 'id');
+      if (relatedTable.parentTable) {
+        const relatedParentMeta = allTables.find(t => t.tableName === relatedTable.parentTable);
+        if (relatedParentMeta && relatedParentMeta.primaryKey) {
+          relatedPkField = toCamelCase(relatedParentMeta.primaryKey.name);
+        }
+      }
+      
+      // 🎯 Buscar displayField: si hereda, incluir campos del padre
+      let relatedTableFields = [...relatedTable.fields];
+      if (relatedTable.parentTable) {
+        const parentMeta = allTables.find(t => t.tableName === relatedTable.parentTable);
+        if (parentMeta) {
+          const parentFields = parentMeta.fields.filter(f => !f.isPrimary && !f.isMethod);
+          relatedTableFields = [...parentFields, ...relatedTable.fields];
+        }
+      }
+      
+      const displayField = relatedTableFields.find(rf => !rf.isPrimary && !rf.isForeign && !rf.name.toLowerCase().endsWith('_id'));
+      const displayFieldName = displayField ? toCamelCase(displayField.name) : relatedPkField;
+      const relationType = f.relationType || '';
+      const isRequired = relationType === 'COMPOSITION';
+      
+      return `          Consumer<${relatedTable.className}Provider>(
+            builder: (context, provider, _) {
+              if (provider.isLoading) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              
+              return DropdownButtonFormField<int>(
+                value: _selected${toPascalCase(f.name)},
+                decoration: InputDecoration(
+                  labelText: '${label}',
+                  border: const OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.link),
+                ),
+                hint: const Text('Seleccione una opción'),
+                items: provider.items.map((item) {
+                  return DropdownMenuItem<int>(
+                    value: item.${relatedPkField},
+                    child: Text('\${item.${displayFieldName}} (ID: \${item.${relatedPkField}})'),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  setState(() {
+                    _selected${toPascalCase(f.name)} = value;
+                  });
+                },
+                validator: ${isRequired ? '(value) {\n                  if (value == null) return \'Campo requerido\';' : '(value) {'}\n                  return null;
+                },
+              );
+            },
+          ),`;
+    }
+    
+    // Si no es FK, generar campo normal usando función auxiliar
+    return generateTextField(f, false);
+  }).filter(s => s).join('\n          const SizedBox(height: 16),\n');
+  
+  // Combinar campos del padre (si existen) + campos propios
+  const allFormFields = parentFieldsSection + formFields;
+
+  // 🎯 HERENCIA: Generar buildData incluyendo campos del padre
+  const buildParentData = parentFields.map(f => {
+    const fieldName = toCamelCase(f.name);
+    const jsonKey = toCamelCase(f.name); // Spring Boot espera camelCase
+    const dartType = mapSqlToDartType(f.type || 'String');
+    
+    if (dartType === 'int') {
+      return `        '${jsonKey}': int.parse(_${fieldName}Controller.text),`;
+    } else if (dartType === 'double') {
+      return `        '${jsonKey}': double.parse(_${fieldName}Controller.text),`;
+    } else if (dartType === 'bool') {
+      return `        '${jsonKey}': _${fieldName}Controller.text == 'true',`;
+    } else {
+      return `        '${jsonKey}': _${fieldName}Controller.text,`;
+    }
+  }).join('\n');
 
   const buildData = editableFields.map(f => {
     const fieldName = toCamelCase(f.name);
-    const dartType = mapSqlToDartType(f.type);
+    const dartType = mapSqlToDartType(f.type || 'String');
+    const isFK = fkTableMap.has(f.name);
     
-    if (dartType === 'int') {
-      return `        '${f.name}': int.parse(_${fieldName}Controller.text),`;
-    } else if (dartType === 'double') {
-      return `        '${f.name}': double.parse(_${fieldName}Controller.text),`;
-    } else if (dartType === 'bool') {
-      return `        '${f.name}': _${fieldName}Controller.text == 'true',`;
-    } else {
-      return `        '${f.name}': _${fieldName}Controller.text,`;
+    // 🎯 Para FKs: usar nombre de tabla referenciada + "Id" (como Spring Boot DTO)
+    let jsonKey = toCamelCase(f.name);
+    if (isFK) {
+      const refTable = fkTableMap.get(f.name);
+      if (refTable) {
+        jsonKey = `${toCamelCase(refTable.tableName)}Id`; // e.g., "pacienteId"
+        console.log(`🔧 [Flutter Form] FK ${f.name} → JSON key: "${jsonKey}" (table: ${refTable.tableName})`);
+      }
     }
-  }).join('\n');
+    
+    // 🎯 FK de herencia ya fueron excluidas en foreignKeyFields
+    
+    // Si es FK, usar variable de selección
+    if (isFK) {
+      return `        '${jsonKey}': _selected${toPascalCase(f.name)},`;
+    }
+    
+    // Si no es FK, parsear del controller
+    if (dartType === 'int') {
+      return `        '${jsonKey}': int.parse(_${fieldName}Controller.text),`;
+    } else if (dartType === 'double') {
+      return `        '${jsonKey}': double.parse(_${fieldName}Controller.text),`;
+    } else if (dartType === 'bool') {
+      return `        '${jsonKey}': _${fieldName}Controller.text == 'true',`;
+    } else {
+      return `        '${jsonKey}': _${fieldName}Controller.text,`;
+    }
+  }).filter(s => s).join('\n');
+  
+  // Combinar datos del padre + datos propios
+  const allBuildData = [buildParentData, buildData].filter(s => s).join('\n');
 
   // Lógica de actualización para tablas intermedias vs normales
   let updateLogic = '';
@@ -1223,13 +1691,15 @@ function generateFormScreen(table: TableMetadata): string {
         await provider.create(${table.className}.fromJson(data));
       }`;
   } else {
-    const pkFieldOriginal = table.primaryKey?.name || 'id';
     updateLogic = `
       if (widget.item != null) {
-        // Actualizar
+        // Actualizar - usar el ID guardado
+        if (_currentId == null) {
+          throw Exception('ID no puede ser nulo al actualizar');
+        }
         final updated = ${table.className}.fromJson({
           ...data,
-          '${pkFieldOriginal}': widget.item!.${pkField},
+          '${pkFieldJson}': _currentId,
         });
         await provider.update(updated);
       } else {
@@ -1238,11 +1708,19 @@ function generateFormScreen(table: TableMetadata): string {
       }`;
   }
 
+  // Generar imports de providers relacionados
+  const relatedProviderImports = Array.from(fkTableMap.values())
+    .map(t => `import '../providers/${t.tableName}_provider.dart';`)
+    .join('\n');
+  const relatedModelImports = Array.from(fkTableMap.values())
+    .map(t => `import '../models/${t.tableName}_model.dart';`)
+    .join('\n');
+
   return `import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/${table.tableName}_provider.dart';
 import '../models/${table.tableName}_model.dart';
-
+${relatedModelImports ? relatedModelImports + '\n' : ''}${relatedProviderImports ? relatedProviderImports + '\n' : ''}
 class ${table.className}FormScreen extends StatefulWidget {
   final ${table.className}? item;
   
@@ -1255,11 +1733,24 @@ class ${table.className}FormScreen extends StatefulWidget {
 class _${table.className}FormScreenState extends State<${table.className}FormScreen> {
   final _formKey = GlobalKey<FormState>();
 ${controllers}
+${fkSelectionVars ? '\n' + fkSelectionVars : ''}
+  int? _currentId; // Guardar el ID del item actual
 
   @override
   void initState() {
     super.initState();
+    
+    // Cargar datos relacionados
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+${fkLoadCalls}
+    });
+    
     if (widget.item != null) {
+      _currentId = widget.item!.${pkField}; // Guardar el ID actual
+      print('📝 [${table.className} Form] Editing item with ID: \$_currentId');
+      if (_currentId == null) {
+        print('⚠️ [${table.className} Form] WARNING: Item ID is null! Item: \${widget.item}');
+      }
 ${initState}
     }
   }
@@ -1275,7 +1766,7 @@ ${dispose}
 
     try {
       final data = {
-${buildData}
+${allBuildData}
       };
 
       final provider = context.read<${table.className}Provider>();
@@ -1309,7 +1800,7 @@ ${buildData}
           key: _formKey,
           child: Column(
             children: [
-${formFields}
+${allFormFields}
               const SizedBox(height: 24),
               SizedBox(
                 width: double.infinity,

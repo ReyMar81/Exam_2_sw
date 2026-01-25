@@ -20,6 +20,7 @@ export type AIAction =
       toTable: string;
       cardinality?: "ONE_TO_ONE" | "ONE_TO_MANY" | "MANY_TO_MANY";
       relationType?: "ASSOCIATION" | "AGGREGATION" | "COMPOSITION" | "INHERITANCE" | "DEPENDENCY" | "REALIZATION";
+      multiplicity?: "1-1" | "1-N" | "N-N"; 
       onDelete?: "CASCADE" | "SET NULL" | "RESTRICT" | "NO ACTION";
       onUpdate?: "CASCADE" | "SET NULL" | "RESTRICT" | "NO ACTION";
       through?: string;
@@ -30,10 +31,10 @@ export type AIAction =
     }
   | {
       type: "AddField";
-      tableName?: string; // Para compatibilidad con formato anterior
-      targetTable?: string; // Para el nuevo formato
-      field?: AIField; // Para compatibilidad con formato anterior (un solo campo)
-      fields?: AIField[]; // Para el nuevo formato (múltiples campos)
+      tableName?: string;
+      targetTable?: string;
+      field?: AIField;
+      fields?: AIField[];
     }
   | {
       type: "RenameTable";
@@ -71,6 +72,35 @@ export type AIAction =
       relationType?: string;
       onDelete?: "CASCADE" | "SET NULL" | "RESTRICT" | "NO ACTION";
       onUpdate?: "CASCADE" | "SET NULL" | "RESTRICT" | "NO ACTION";
+    }
+  | {
+      type: "AddMethod";
+      tableName: string;
+      methodName: string;
+    }
+  | {
+      type: "RenameMethod";
+      tableName: string;
+      oldMethodName: string;
+      newMethodName: string;
+    }
+  | {
+      type: "DeleteMethod";
+      tableName: string;
+      methodNames: string[];
+    }
+  | {
+      type: "ChangeView";
+      viewMode: "SQL" | "UML";
+    }
+  | {
+      type: "ExportSQL";
+    }
+  | {
+      type: "ExportSpringBoot";
+    }
+  | {
+      type: "ExportFlutter";
     };
 
 export interface AIField {
@@ -93,9 +123,10 @@ const SYSTEM_PROMPT = `Eres un modelo de IA encargado de interpretar instruccion
 
 REGLAS GENERALES:
 - Siempre devuelves un JSON válido con la propiedad "actions" (array de objetos).
-- Cada acción tiene un campo "type" con valores posibles: CreateTable, AddField, CreateRelation, DeleteTable, RenameTable, DeleteRelation, RenameField, DeleteField, ModifyField, ModifyRelation.
+- Cada acción tiene un campo "type" con valores posibles: CreateTable, AddField, CreateRelation, DeleteTable, RenameTable, DeleteRelation, RenameField, DeleteField, ModifyField, ModifyRelation, AddMethod, RenameMethod, DeleteMethod.
 - No incluyas explicaciones ni texto adicional fuera del JSON.
 - Usa nombres de tablas y campos en minúsculas y sin espacios (snake_case).
+- Los MÉTODOS son texto libre (ej: "crearUsuario()", "validar(id: number)") y solo aparecen en diagramas UML de clases.
 
 ACCIONES DISPONIBLES:
 
@@ -117,8 +148,9 @@ ACCIONES DISPONIBLES:
 
 2. CreateRelation: Crear relación entre dos tablas existentes
    - IMPORTANTE: Usa "relationType" para tipos UML 2.5, NO uses "cardinality" para ellos
-   - Campo "cardinality": Solo para cardinalidades clásicas ("ONE_TO_ONE", "ONE_TO_MANY", "MANY_TO_MANY")
+   - Campo "cardinality": Solo para cardinalidades clásicas de BD ("ONE_TO_ONE", "ONE_TO_MANY", "MANY_TO_MANY")
    - Campo "relationType": Para tipos UML 2.5 ("ASSOCIATION", "AGGREGATION", "COMPOSITION", "INHERITANCE", "DEPENDENCY", "REALIZATION")
+   - Campo "multiplicity": Para especificar cardinalidad de relaciones UML ("1-1", "1-N", "N-N")
    - Propiedades CASCADE: "onDelete" y "onUpdate" (valores: "CASCADE", "SET NULL", "RESTRICT", "NO ACTION")
    
    ⚠️ REGLA CRÍTICA PARA HERENCIA:
@@ -127,19 +159,42 @@ ACCIONES DISPONIBLES:
    → fromTable = tabla hija/subclase (la que hereda)
    → toTable = tabla padre/superclase (de quien hereda)
    
-   TIPOS DE RELACIONES UML 2.5 (usar "relationType", NO "cardinality"):
+   TIPOS DE RELACIONES UML 2.5 (usar "relationType" + "multiplicity", NO "cardinality"):
    - INHERITANCE: Para relaciones "es un" (herencia, extiende, generalización, subclase, superclase)
      * "Empleado hereda de Persona" → { "relationType": "INHERITANCE", "fromTable": "empleado", "toTable": "persona" }
      * "Gerente extiende Empleado" → { "relationType": "INHERITANCE" }
    - COMPOSITION: Relación fuerte (el componente no existe sin el todo)
-     * "Habitación es parte de Casa" → { "relationType": "COMPOSITION", "onDelete": "CASCADE" }
+     * "Habitación es parte de Casa" → { "relationType": "COMPOSITION", "multiplicity": "1-N", "onDelete": "CASCADE" }
+     * "Composición 1 a muchos de orden a detalle" → { "relationType": "COMPOSITION", "multiplicity": "1-N" }
+     * ⚠️ COMPOSITION solo permite "1-1" o "1-N", NUNCA "N-N"
    - AGGREGATION: Relación débil (el componente puede existir independientemente)
-     * "Profesor tiene Departamento" → { "relationType": "AGGREGATION", "onDelete": "SET NULL" }
-   - ASSOCIATION: Relación simple entre entidades
-   - DEPENDENCY: Dependencia temporal o de uso
-   - REALIZATION: Implementación de interfaz
+     * "Profesor tiene Departamento" → { "relationType": "AGGREGATION", "multiplicity": "1-N", "onDelete": "SET NULL" }
+     * "Agregación 1 a 1 de usuario a perfil" → { "relationType": "AGGREGATION", "multiplicity": "1-1" }
+     * ⚠️ AGGREGATION solo permite "1-1" o "1-N", NUNCA "N-N"
+   - ASSOCIATION: Relación simple entre entidades (SIEMPRE requiere "multiplicity")
+     * "Asociación 1 a 1 entre usuario y perfil" → { "relationType": "ASSOCIATION", "multiplicity": "1-1" }
+     * "Asociación 1 a muchos de cliente a pedido" → { "relationType": "ASSOCIATION", "multiplicity": "1-N" }
+     * "Asociación muchos a muchos entre estudiante y curso" → { "relationType": "ASSOCIATION", "multiplicity": "N-N" }
+     * Si el usuario dice solo "asociación" sin especificar, usa "multiplicity": "1-N" por defecto
+     * ✅ ASSOCIATION permite "1-1", "1-N" y "N-N"
+   - DEPENDENCY: Dependencia temporal o de uso (sin multiplicity)
+   - REALIZATION: Implementación de interfaz (sin multiplicity)
    
-   CARDINALIDADES CLÁSICAS (usar "cardinality"):
+   🔑 REGLA IMPORTANTE PARA ASSOCIATION:
+   - SIEMPRE debe incluir "multiplicity" ("1-1", "1-N", o "N-N")
+   - "multiplicity": "N-N" crea automáticamente tabla intermedia
+   - "multiplicity": "1-N" crea FK en la tabla destino (target)
+   - "multiplicity": "1-1" crea FK en la tabla destino (target)
+   - ✅ ASSOCIATION es la ÚNICA relación que permite "N-N"
+   
+   🔑 REGLA IMPORTANTE PARA AGGREGATION Y COMPOSITION:
+   - SIEMPRE debe incluir "multiplicity" ("1-1" o "1-N" solamente)
+   - ❌ NUNCA usar "multiplicity": "N-N" con AGGREGATION o COMPOSITION
+   - Si el usuario pide muchos a muchos con agregación/composición, usar ASSOCIATION N-N en su lugar
+   - "multiplicity": "1-N" crea FK en la tabla destino (target)
+   - "multiplicity": "1-1" crea FK en la tabla destino (target)
+   
+   CARDINALIDADES CLÁSICAS DE BD (usar "cardinality", NO "relationType"):
    - "uno a uno" → { "cardinality": "ONE_TO_ONE" }
    - "uno a muchos" → { "cardinality": "ONE_TO_MANY" }
    - "muchos a muchos" → { "cardinality": "MANY_TO_MANY" }
@@ -167,6 +222,33 @@ ACCIONES DISPONIBLES:
 
 10. ModifyRelation: Modificar tipo o propiedades de una relación
     - Requiere "fromTable", "toTable", y propiedades a cambiar ("relationType", "onDelete", "onUpdate")
+
+11. AddMethod: Agregar método(s) a una tabla (para diagramas UML de clases)
+    - Requiere "tableName", "methodName" (texto libre)
+    - Ejemplos: "crearUsuario()", "validar(id: number): boolean", "insertar(tipo: string)"
+    - Los métodos NO se exportan a SQL, solo son visuales en UML
+
+12. RenameMethod: Renombrar un método de una tabla
+    - Requiere "tableName", "oldMethodName", "newMethodName"
+
+13. DeleteMethod: Eliminar método(s) de una tabla
+    - Requiere "tableName", "methodNames" (array de nombres de métodos)
+
+14. ChangeView: Cambiar entre vista SQL y vista UML
+    - Se activa con: "cambia a vista UML", "muestra en UML", "vista SQL", "cambia a SQL"
+    - Requiere "viewMode": "SQL" o "UML"
+
+15. ExportSQL: Descargar/exportar el diagrama como script SQL
+    - Se activa con: "descarga el SQL", "exporta SQL", "genera SQL", "dame el script SQL"
+    - No requiere parámetros adicionales
+
+16. ExportSpringBoot: Descargar/exportar proyecto Spring Boot completo
+    - Se activa con: "exporta el backend", "descarga Spring Boot", "genera el backend", "dame el proyecto Spring Boot"
+    - No requiere parámetros adicionales
+
+17. ExportFlutter: Descargar/exportar proyecto Flutter completo
+    - Se activa con: "exporta Flutter", "descarga el frontend", "genera la app", "dame el proyecto Flutter"
+    - No requiere parámetros adicionales
 
 REGLAS PARA RELACIONES MUCHOS A MUCHOS (M:N o N:N):
 
@@ -259,10 +341,10 @@ REGLAS DE INFERENCIA:
   * "cliente tiene muchos pedidos" → ONE_TO_MANY (from: cliente, to: pedido)
   * "usuario pertenece a un rol" → MANY_TO_ONE (from: usuario, to: rol) → interpreta como ONE_TO_MANY invertida
   * "producto y categoría muchos a muchos" → MANY_TO_MANY
-  * "composición de A en B" → COMPOSITION (onDelete: CASCADE, onUpdate: CASCADE)
-  * "agregación de X a Y" → AGGREGATION (onDelete: SET NULL, onUpdate: CASCADE)
+  * "composición de A en B" → COMPOSITION (onDelete: CASCADE, onUpdate: CASCADE) + inferir multiplicity
+  * "agregación de X a Y" → AGGREGATION (onDelete: SET NULL, onUpdate: CASCADE) + inferir multiplicity
   * "B hereda de A" → INHERITANCE (onDelete: CASCADE, onUpdate: CASCADE)
-  * "asociación entre X y Y" → ASSOCIATION
+  * "asociación entre X y Y" → ASSOCIATION + SIEMPRE incluir multiplicity ("1-1", "1-N", o "N-N")
   * "dependencia de A hacia B" → DEPENDENCY
   * "realización de interfaz I por clase C" → REALIZATION
   
@@ -381,6 +463,35 @@ Salida:
     "fromTable": "pedido",
     "toTable": "cliente",
     "relationType": "ASSOCIATION",
+    "multiplicity": "1-N",
+    "onDelete": "RESTRICT",
+    "onUpdate": "NO ACTION"
+  }]
+}
+
+Entrada: "Asociación 1 a 1 entre usuario y perfil"
+Salida:
+{
+  "actions": [{
+    "type": "CreateRelation",
+    "fromTable": "usuario",
+    "toTable": "perfil",
+    "relationType": "ASSOCIATION",
+    "multiplicity": "1-1",
+    "onDelete": "RESTRICT",
+    "onUpdate": "NO ACTION"
+  }]
+}
+
+Entrada: "Asociación muchos a muchos entre estudiante y curso"
+Salida:
+{
+  "actions": [{
+    "type": "CreateRelation",
+    "fromTable": "estudiante",
+    "toTable": "curso",
+    "relationType": "ASSOCIATION",
+    "multiplicity": "N-N",
     "onDelete": "RESTRICT",
     "onUpdate": "NO ACTION"
   }]
@@ -625,6 +736,56 @@ Ejemplos CORRECTOS de FKs:
 Ejemplos INCORRECTOS (NO HACER):
   { "name": "profesor_id", "type": "SERIAL", "isForeign": true }  ❌
   { "name": "estudiante_id", "type": "SERIAL" }  ❌
+
+EJEMPLOS DE MÉTODOS (solo para diagramas UML de clases):
+
+Entrada: "Agrega método crearUsuario() a tabla usuario"
+Salida:
+{
+  "actions": [{
+    "type": "AddMethod",
+    "tableName": "usuario",
+    "methodName": "crearUsuario()"
+  }]
+}
+
+Entrada: "Añade los métodos validar(id: number) y eliminar() a la tabla producto"
+Salida:
+{
+  "actions": [
+    {
+      "type": "AddMethod",
+      "tableName": "producto",
+      "methodName": "validar(id: number)"
+    },
+    {
+      "type": "AddMethod",
+      "tableName": "producto",
+      "methodName": "eliminar()"
+    }
+  ]
+}
+
+Entrada: "Renombra el método crear() a insertarRegistro() en tabla cliente"
+Salida:
+{
+  "actions": [{
+    "type": "RenameMethod",
+    "tableName": "cliente",
+    "oldMethodName": "crear()",
+    "newMethodName": "insertarRegistro()"
+  }]
+}
+
+Entrada: "Elimina los métodos validar() y procesar() de la tabla pedido"
+Salida:
+{
+  "actions": [{
+    "type": "DeleteMethod",
+    "tableName": "pedido",
+    "methodNames": ["validar()", "procesar()"]
+  }]
+}
 
 Entrada: "Relación 1 a muchos entre cliente y pedido"
 Salida:
@@ -923,10 +1084,84 @@ Para cada caja/rectángulo en el diagrama:
   - Si la tabla NO tiene campos visibles, agrega este campo por defecto:
     { "name": "id", "type": "INT", "isPrimary": true }
   - Esto replica el comportamiento del software (addNode siempre crea campo id)
-- Si ves guiones (-) al inicio del campo, son atributos normales
 
-Tipos de datos comunes:
-- Texto corto → VARCHAR(100)
+┌─────────────────────────────────────────────────────────────┐
+│ DISTINGUIR ATRIBUTOS vs MÉTODOS                             │
+├─────────────────────────────────────────────────────────────┤
+│ ⚠️ REGLA SIMPLE: Si tiene () es MÉTODO, sino es ATRIBUTO   │
+│                                                              │
+│ ATRIBUTOS (campos de datos):                                │
+│   - NO tienen paréntesis ()                                 │
+│   - Tienen tipo de dato después de ":"                      │
+│   - Pueden tener guión (-) o nada al inicio                 │
+│   - Aparecen ARRIBA de línea divisoria (si existe)          │
+│                                                              │
+│   Ejemplos en imagen:                                       │
+│   "- nombre: string"     → ATRIBUTO                         │
+│   "- id: integer"        → ATRIBUTO                         │
+│   "email: VARCHAR"       → ATRIBUTO                         │
+│   "activo: boolean"      → ATRIBUTO                         │
+│                                                              │
+│   JSON correcto:                                            │
+│   { "name": "nombre", "type": "VARCHAR(255)" }              │
+│   { "name": "id", "type": "INT", "isPrimary": true }        │
+│   { "name": "email", "type": "VARCHAR(255)" }               │
+│   { "name": "activo", "type": "BOOLEAN" }                   │
+│                                                              │
+│ MÉTODOS (funciones/operaciones):                            │
+│   - SIEMPRE tienen paréntesis ()                            │
+│   - Pueden tener (+) o (-) al inicio                        │
+│   - Aparecen ABAJO de línea divisoria (si existe)           │
+│   - Copia el texto COMPLETO incluyendo () y parámetros      │
+│                                                              │
+│   Ejemplos en imagen:                                       │
+│   "+ crearUsuario()"              → MÉTODO                  │
+│   "+ validar()"                   → MÉTODO                  │
+│   "eliminar(id: int)"             → MÉTODO                  │
+│   "calcular(x: int, y: int): int" → MÉTODO                  │
+│   "toString(): string"            → MÉTODO                  │
+│                                                              │
+│   JSON correcto:                                            │
+│   { "name": "crearUsuario()", "isMethod": true }            │
+│   { "name": "validar()", "isMethod": true }                 │
+│   { "name": "eliminar(id: int)", "isMethod": true }         │
+│   { "name": "calcular(x: int, y: int): int", "isMethod": true }│
+│   { "name": "toString(): string", "isMethod": true }        │
+│                                                              │
+│ ⚠️ CRÍTICO:                                                 │
+│   - Si ves (), marca "isMethod": true                       │
+│   - NO agregues campo "type" a los métodos                  │
+│   - Copia el nombre completo con () y todo                  │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│ CONVERSIÓN DE TIPOS: UML → SQL                              │
+├─────────────────────────────────────────────────────────────┤
+│ ⚠️ CRÍTICO: Siempre convertir tipos UML a tipos SQL         │
+│                                                              │
+│ Si ves tipos UML en la imagen, conviértelos así:            │
+│   "string"  → "VARCHAR(255)"                                │
+│   "String"  → "VARCHAR(255)"                                │
+│   "integer" → "INT"                                         │
+│   "Integer" → "INT"                                         │
+│   "int"     → "INT"                                         │
+│   "long"    → "BIGINT"                                      │
+│   "Long"    → "BIGINT"                                      │
+│   "boolean" → "BOOLEAN"                                     │
+│   "Boolean" → "BOOLEAN"                                     │
+│   "float"   → "DECIMAL(10,2)"                               │
+│   "Float"   → "DECIMAL(10,2)"                               │
+│   "double"  → "DOUBLE"                                      │
+│   "Double"  → "DOUBLE"                                      │
+│   "date"    → "DATE"                                        │
+│   "Date"    → "DATE"                                        │
+│                                                              │
+│ NUNCA uses "string", "integer", etc. en el JSON             │
+│ SIEMPRE usa tipos SQL: VARCHAR, INT, BOOLEAN, etc.          │
+└─────────────────────────────────────────────────────────────┘
+
+Tipos de datos SQL para ATRIBUTOS (usar estos en JSON):
+- Texto corto → VARCHAR(100) o VARCHAR(255)
 - Texto largo → TEXT  
 - Números enteros → INT
 - Identificadores → SERIAL (si es PK)
@@ -1246,6 +1481,14 @@ Imagen:
 5. ✅ ¿Usaste "relationType" para símbolos (▷,◆,◇)?
 6. ✅ ¿Usaste "cardinality" para números (1,*,1-1,1-N)?
 7. ✅ ¿Las tablas intermedias N-M tienen campos extra o las omitiste?
+8. ✅ ¿Identificaste TODOS los métodos (textos con paréntesis)?
+9. ✅ ¿Marcaste los métodos con "isMethod": true?
+10. ✅ ¿Convertiste tipos UML (string, integer) a SQL (VARCHAR, INT)?
+4. ✅ ¿Cada línea visible tiene su CreateRelation?
+5. ✅ ¿Usaste "relationType" para símbolos (▷,◆,◇)?
+6. ✅ ¿Usaste "cardinality" para números (1,*,1-1,1-N)?
+7. ✅ ¿Las tablas intermedias N-M tienen campos extra o las omitiste?
+8. ✅ ¿Identificaste métodos (con paréntesis) y los marcaste con "isMethod": true?
 
 ═══════════════════════════════════════════════════════════════
 📋 FORMATO JSON DE RESPUESTA
@@ -1258,21 +1501,150 @@ Imagen:
       "name": "nombre_tabla",
       "fields": [
         { "name": "id", "type": "SERIAL", "isPrimary": true },
-        { "name": "campo1", "type": "VARCHAR(100)" }
+        { "name": "campo1", "type": "VARCHAR(100)" },
+        { "name": "metodo1()", "isMethod": true }
       ]
     },
     {
       "type": "CreateRelation",
       "fromTable": "tabla_origen",
       "toTable": "tabla_destino",
-      "relationType": "INHERITANCE"  // o COMPOSITION, AGGREGATION
+      "relationType": "INHERITANCE"  // o COMPOSITION, AGGREGATION, ASSOCIATION
       // O usa "cardinality": "ONE_TO_MANY" si no hay símbolos UML
     }
   ]
 }
 
 ═══════════════════════════════════════════════════════════════
-📖 EJEMPLO COMPLETO - Herencias múltiples
+📖 EJEMPLO 1 - Clase UML con Atributos y Métodos
+═══════════════════════════════════════════════════════════════
+
+Imagen muestra:
+┌────────────────────┐
+│      Usuario       │
+├────────────────────┤
+│ - id: integer      │  ← Tipo UML en imagen
+│ - nombre: string   │  ← Tipo UML en imagen
+│ - activo: boolean  │  ← Tipo UML en imagen
+├────────────────────┤ ← Línea divisoria
+│ + crearUsuario()   │
+│ + validar()        │
+│ + eliminar()       │
+└────────────────────┘
+
+JSON correcto (⚠️ CONVERTIDO A TIPOS SQL):
+{
+  "actions": [
+    {
+      "type": "CreateTable",
+      "name": "usuario",
+      "fields": [
+        { "name": "id", "type": "INT", "isPrimary": true },
+        { "name": "nombre", "type": "VARCHAR(255)" },
+        { "name": "activo", "type": "BOOLEAN" },
+        { "name": "crearUsuario()", "isMethod": true },
+        { "name": "validar()", "isMethod": true },
+        { "name": "eliminar()", "isMethod": true }
+      ]
+    }
+  ]
+}
+
+═══════════════════════════════════════════════════════════════
+📖 EJEMPLO 2 - Diagrama UML con AGREGACIÓN y Métodos
+═══════════════════════════════════════════════════════════════
+
+Imagen muestra:
+┌────────────────────┐                  ┌────────────────────┐
+│    Departamento    │◇──────────────── │     Empleado       │
+├────────────────────┤                  ├────────────────────┤
+│ - nombre: string   │                  │ - nombre: string   │
+├────────────────────┤                  │ - salario: float   │
+│ + agregar()        │ ← () = MÉTODO    ├────────────────────┤
+│ + listar()         │ ← () = MÉTODO    │ + calcularBono()   │ ← () = MÉTODO
+│ + eliminar(id:int) │ ← () = MÉTODO    │ + aumentar(%)      │ ← () = MÉTODO
+└────────────────────┘                  └────────────────────┘
+
+JSON correcto (⚠️ Métodos con "isMethod": true):
+{
+  "actions": [
+    {
+      "type": "CreateTable",
+      "name": "departamento",
+      "fields": [
+        { "name": "nombre", "type": "VARCHAR(255)" },
+        { "name": "agregar()", "isMethod": true },
+        { "name": "listar()", "isMethod": true },
+        { "name": "eliminar(id:int)", "isMethod": true }
+      ]
+    },
+    {
+      "type": "CreateTable",
+      "name": "empleado",
+      "fields": [
+        { "name": "nombre", "type": "VARCHAR(255)" },
+        { "name": "salario", "type": "DECIMAL(10,2)" },
+        { "name": "calcularBono()", "isMethod": true },
+        { "name": "aumentar(%)", "isMethod": true }
+      ]
+    },
+    {
+      "type": "CreateRelation",
+      "fromTable": "departamento",
+      "toTable": "empleado",
+      "relationType": "AGGREGATION"
+    }
+  ]
+}
+
+═══════════════════════════════════════════════════════════════
+📖 EJEMPLO 3 - Detección de Métodos (CRÍTICO)
+═══════════════════════════════════════════════════════════════
+
+Imagen muestra clase Producto:
+┌────────────────────┐
+│     Producto       │
+├────────────────────┤
+│ - id: int          │  ← NO tiene () = ATRIBUTO
+│ - nombre: string   │  ← NO tiene () = ATRIBUTO
+│ - precio: float    │  ← NO tiene () = ATRIBUTO
+├────────────────────┤  ← Línea divisoria
+│ + guardar()        │  ← SÍ tiene () = MÉTODO
+│ + actualizar()     │  ← SÍ tiene () = MÉTODO
+│ + eliminar()       │  ← SÍ tiene () = MÉTODO
+│ + calcularIVA()    │  ← SÍ tiene () = MÉTODO
+└────────────────────┘
+
+JSON correcto:
+{
+  "actions": [
+    {
+      "type": "CreateTable",
+      "name": "producto",
+      "fields": [
+        { "name": "id", "type": "INT", "isPrimary": true },
+        { "name": "nombre", "type": "VARCHAR(255)" },
+        { "name": "precio", "type": "DECIMAL(10,2)" },
+        { "name": "guardar()", "isMethod": true },
+        { "name": "actualizar()", "isMethod": true },
+        { "name": "eliminar()", "isMethod": true },
+        { "name": "calcularIVA()", "isMethod": true }
+      ]
+    }
+  ]
+}
+    },
+    {
+      "type": "CreateRelation",
+      "fromTable": "departamento",
+      "toTable": "empleado",
+      "relationType": "AGGREGATION"
+    }
+  ]
+}
+
+═══════════════════════════════════════════════════════════════
+📖 EJEMPLO 3 - Herencias múltiples (sin cambios)
 ═══════════════════════════════════════════════════════════════
 
 Imagen muestra:
@@ -1537,6 +1909,24 @@ export function validateActions(actions: AIAction[]): {
         if (!action.relationType && !action.onDelete && !action.onUpdate) {
           errors.push(`Action ${index}: ModifyRelation has no properties to modify`);
         }
+        break;
+
+      case "ChangeView":
+        if (!action.viewMode || (action.viewMode !== "SQL" && action.viewMode !== "UML")) {
+          errors.push(`Action ${index}: ChangeView invalid viewMode (must be "SQL" or "UML")`);
+        }
+        break;
+
+      case "ExportSQL":
+        // No requiere validación adicional
+        break;
+
+      case "ExportSpringBoot":
+        // No requiere validación adicional
+        break;
+
+      case "ExportFlutter":
+        // No requiere validación adicional
         break;
 
       default:

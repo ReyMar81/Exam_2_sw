@@ -24,11 +24,12 @@ import DownloadButton from "../components/DownloadButton";
 import { generateSQL, downloadSQL } from "../utils/sqlGenerator";
 import { generateSpringBootProject, downloadSpringBootProject } from "../utils/springBootGenerator";
 import { generateFlutterProject, downloadFlutterProject } from "../utils/flutterGenerator";
-import { determinePKFK, createFKField } from "../utils/relationHandler";
+import { determinePKFK, createFKField, removeFKFieldsFromEdge } from "../utils/relationHandler";
 import { getEdgeStyle, UML_SVG_MARKERS } from "../utils/relationStyles";
 import UmlMultiplicityEdge from "../components/edges/UmlMultiplicityEdge";
 import { getMultiplicitiesFromRelationType } from "../utils/multiplicityHelper";
 import { AIPromptBar } from "../components/AIPromptBar";
+import { useViewMode } from "../store/ViewModeContext";
 
 function throttle<T extends (...args: any[]) => any>(func: T, delay: number): T {
   let timeout: NodeJS.Timeout | null = null;
@@ -47,6 +48,7 @@ export default function DiagramEditor() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user, project, setProject } = useAppStore();
+  const { setViewMode } = useViewMode();
   const [isConnected, setConnected] = useState(false);
   const [userRole, setUserRole] = useState<string>("VIEWER");
   const [activeUsers, setActiveUsers] = useState<any[]>([]);
@@ -372,6 +374,12 @@ export default function DiagramEditor() {
             break;
 
           case "DELETE_EDGE":
+            // 🔥 Buscar el edge antes de eliminarlo para limpiar FK
+            const edgeToDeleteFromSocket = edges.find((e) => e.id === payload.id);
+            if (edgeToDeleteFromSocket) {
+              removeFKFieldsFromEdge(edgeToDeleteFromSocket, nodes, setNodes);
+            }
+            
             setEdges((eds) => {
               console.log("✂️ [Editor] Deleting edge:", payload.id);
               return eds.filter((e) => e.id !== payload.id);
@@ -547,7 +555,8 @@ export default function DiagramEditor() {
         return;
       }
 
-      if (relationType === "N-N") {
+      // 🔷 N-N: Crea tabla intermedia automáticamente (para BD y ASOCIACIÓN UML)
+      if (relationType === "N-N" || (relationType === "ASSOCIATION" && multiplicity === "N-N")) {
         const sourceTableName = sourceNode.data.name || sourceNode.data.label || "tabla1";
         const targetTableName = targetNode.data.name || targetNode.data.label || "tabla2";
         
@@ -557,6 +566,8 @@ export default function DiagramEditor() {
         const targetPKName = targetPK?.name || "id";
         
         const joinTableId = `join-${Date.now()}`;
+        const finalRelationType = relationType === "ASSOCIATION" ? "ASSOCIATION" : "N-N";
+        
         const joinTableNode: Node = {
           id: joinTableId,
           type: "table",
@@ -577,7 +588,7 @@ export default function DiagramEditor() {
                 nullable: false,
                 references: sourceTableName,
                 referencesField: sourcePKName,
-                relationType: "N-N"
+                relationType: finalRelationType
               },
               { 
                 id: Date.now() + 2, 
@@ -587,14 +598,14 @@ export default function DiagramEditor() {
                 nullable: false,
                 references: targetTableName,
                 referencesField: targetPKName,
-                relationType: "N-N"
+                relationType: finalRelationType
               },
             ],
           },
         };
 
-        const edgeStyle1 = getEdgeStyle("1-N");
-        const edgeStyle2 = getEdgeStyle("1-N");
+        const edgeStyle1 = getEdgeStyle(relationType === "ASSOCIATION" ? "ASSOCIATION" : "1-N");
+        const edgeStyle2 = getEdgeStyle(relationType === "ASSOCIATION" ? "ASSOCIATION" : "1-N");
 
         const edge1: Edge = {
           id: `edge-${Date.now()}-1`,
@@ -607,13 +618,15 @@ export default function DiagramEditor() {
             strokeWidth: edgeStyle1.strokeWidth,
             strokeDasharray: edgeStyle1.strokeDasharray
           },
-          markerEnd: { type: 'arrowclosed', color: edgeStyle1.stroke },
+          markerEnd: relationType === "ASSOCIATION" 
+            ? undefined  // ASOCIACIÓN no tiene flecha
+            : { type: 'arrowclosed', color: edgeStyle1.stroke },
           data: {
             sourceField: sourcePKName,
             targetField: `${sourceTableName}_${sourcePKName}`,
-            relationType: "1-N",
-            sourceMultiplicity: "",
-            targetMultiplicity: ""
+            relationType: finalRelationType,
+            sourceMultiplicity: relationType === "ASSOCIATION" ? "*" : "",
+            targetMultiplicity: relationType === "ASSOCIATION" ? "*" : ""
           }
         };
 
@@ -628,13 +641,15 @@ export default function DiagramEditor() {
             strokeWidth: edgeStyle2.strokeWidth,
             strokeDasharray: edgeStyle2.strokeDasharray
           },
-          markerEnd: { type: 'arrowclosed', color: edgeStyle2.stroke },
+          markerEnd: relationType === "ASSOCIATION"
+            ? undefined  // ASOCIACIÓN no tiene flecha
+            : { type: 'arrowclosed', color: edgeStyle2.stroke },
           data: {
             sourceField: targetPKName,
             targetField: `${targetTableName}_${targetPKName}`,
-            relationType: "1-N",
-            sourceMultiplicity: "",
-            targetMultiplicity: ""
+            relationType: finalRelationType,
+            sourceMultiplicity: relationType === "ASSOCIATION" ? "*" : "",
+            targetMultiplicity: relationType === "ASSOCIATION" ? "*" : ""
           }
         };
 
@@ -702,12 +717,20 @@ export default function DiagramEditor() {
           console.log(`🔗 [1-N] Lado 1: ${sourceNode.data.name} (PK), Lado N: ${targetNode.data.name} (FK)`);
           
         } else if (relationType === "ASSOCIATION") {
-          // ASSOCIATION: FK va hacia donde apunta la flecha (target)
-          // Source → Target: FK en target
-          pkTable = sourceNode;
-          fkTable = targetNode;
-          console.log(`🔗 [ASSOCIATION] Flecha apunta a ${targetNode.data.name}, FK en ${targetNode.data.name}`);
-          
+          // ASOCIACIÓN: No crea FK, solo línea visual con multiplicidad
+          // Según multiplicity, determinar si necesita FK (1-1, 1-N) o tabla intermedia (N-N)
+          if (multiplicity === "1-1") {
+            // 1-1: FK en target por convención
+            pkTable = sourceNode;
+            fkTable = targetNode;
+            console.log(`🔗 [ASSOCIATION 1-1] PK en ${sourceNode.data.name}, FK en ${targetNode.data.name}`);
+          } else if (multiplicity === "1-N") {
+            // 1-N: FK en el lado "muchos" (target)
+            pkTable = sourceNode;
+            fkTable = targetNode;
+            console.log(`🔗 [ASSOCIATION 1-N] Lado 1: ${sourceNode.data.name}, Lado N con FK: ${targetNode.data.name}`);
+          }
+          // N-N ya se manejó arriba con tabla intermedia
         } else {
           const detected = determinePKFK(sourceNode, targetNode);
           pkTable = detected.pkTable;
@@ -1005,6 +1028,84 @@ export default function DiagramEditor() {
           if (confirmDelete) {
             console.log("🗑️ [Editor] Deleting edge with Delete key:", selectedEdge.id);
             
+            // 🔥 Eliminar campos FK asociados a esta relación y obtener nodos afectados
+            let affectedNodeIds: string[] = [];
+            setNodes((currentNodes) => {
+              const updatedNodes = currentNodes.map((node) => {
+                if (node.id !== selectedEdge.source && node.id !== selectedEdge.target) {
+                  return node;
+                }
+                
+                const targetFieldName = selectedEdge.data?.targetField;
+                const sourceFieldName = selectedEdge.data?.sourceField;
+                const relationType = selectedEdge.data?.relationType;
+                
+                const updatedFields = node.data.fields.filter((field) => {
+                  if (!field.isForeign) return true;
+                  
+                  if (node.id === selectedEdge.target && field.name === targetFieldName) {
+                    affectedNodeIds.push(node.id);
+                    console.log(`   ✂️ Removing FK field "${field.name}" from target node`);
+                    return false;
+                  }
+                  
+                  if (node.id === selectedEdge.source && field.name === sourceFieldName && field.isForeign) {
+                    affectedNodeIds.push(node.id);
+                    console.log(`   ✂️ Removing FK field "${field.name}" from source node`);
+                    return false;
+                  }
+                  
+                  const sourceNode = currentNodes.find(n => n.id === selectedEdge.source);
+                  const targetNode = currentNodes.find(n => n.id === selectedEdge.target);
+                  
+                  if (sourceNode && targetNode) {
+                    const referencesSource = field.references === sourceNode.data.name;
+                    const referencesTarget = field.references === targetNode.data.name;
+                    
+                    if ((node.id === selectedEdge.target && referencesSource) || 
+                        (node.id === selectedEdge.source && referencesTarget)) {
+                      if (field.relationType === relationType || !field.relationType) {
+                        affectedNodeIds.push(node.id);
+                        console.log(`   ✂️ Removing FK field "${field.name}" (references ${field.references})`);
+                        return false;
+                      }
+                    }
+                  }
+                  
+                  return true;
+                });
+                
+                if (updatedFields.length !== node.data.fields.length) {
+                  return {
+                    ...node,
+                    data: {
+                      ...node.data,
+                      fields: updatedFields
+                    }
+                  };
+                }
+                
+                return node;
+              });
+              
+              // Sincronizar nodos afectados
+              setTimeout(() => {
+                affectedNodeIds = [...new Set(affectedNodeIds)]; // Eliminar duplicados
+                affectedNodeIds.forEach(nodeId => {
+                  const node = updatedNodes.find(n => n.id === nodeId);
+                  if (node) {
+                    socket.emit("diagram-change", {
+                      projectId: project.id,
+                      action: "UPDATE_NODE",
+                      payload: { id: node.id, data: node.data },
+                    });
+                  }
+                });
+              }, 50);
+              
+              return updatedNodes;
+            });
+            
             // Eliminar edge localmente
             setEdges((eds: Edge[]) => eds.filter((e: Edge) => e.id !== selectedEdge.id));
 
@@ -1043,6 +1144,84 @@ export default function DiagramEditor() {
       if (confirmDelete) {
         console.log("🗑️ [Editor] Deleting edge with context menu:", edge.id);
         
+        // 🔥 Eliminar campos FK asociados a esta relación y obtener nodos afectados
+        let affectedNodeIds: string[] = [];
+        setNodes((currentNodes) => {
+          const updatedNodes = currentNodes.map((node) => {
+            if (node.id !== edge.source && node.id !== edge.target) {
+              return node;
+            }
+            
+            const targetFieldName = edge.data?.targetField;
+            const sourceFieldName = edge.data?.sourceField;
+            const relationType = edge.data?.relationType;
+            
+            const updatedFields = node.data.fields.filter((field) => {
+              if (!field.isForeign) return true;
+              
+              if (node.id === edge.target && field.name === targetFieldName) {
+                affectedNodeIds.push(node.id);
+                console.log(`   ✂️ Removing FK field "${field.name}" from target node`);
+                return false;
+              }
+              
+              if (node.id === edge.source && field.name === sourceFieldName && field.isForeign) {
+                affectedNodeIds.push(node.id);
+                console.log(`   ✂️ Removing FK field "${field.name}" from source node`);
+                return false;
+              }
+              
+              const sourceNode = currentNodes.find(n => n.id === edge.source);
+              const targetNode = currentNodes.find(n => n.id === edge.target);
+              
+              if (sourceNode && targetNode) {
+                const referencesSource = field.references === sourceNode.data.name;
+                const referencesTarget = field.references === targetNode.data.name;
+                
+                if ((node.id === edge.target && referencesSource) || 
+                    (node.id === edge.source && referencesTarget)) {
+                  if (field.relationType === relationType || !field.relationType) {
+                    affectedNodeIds.push(node.id);
+                    console.log(`   ✂️ Removing FK field "${field.name}" (references ${field.references})`);
+                    return false;
+                  }
+                }
+              }
+              
+              return true;
+            });
+            
+            if (updatedFields.length !== node.data.fields.length) {
+              return {
+                ...node,
+                data: {
+                  ...node.data,
+                  fields: updatedFields
+                }
+              };
+            }
+            
+            return node;
+          });
+          
+          // Sincronizar nodos afectados
+          setTimeout(() => {
+            affectedNodeIds = [...new Set(affectedNodeIds)]; // Eliminar duplicados
+            affectedNodeIds.forEach(nodeId => {
+              const node = updatedNodes.find(n => n.id === nodeId);
+              if (node) {
+                socket.emit("diagram-change", {
+                  projectId: project.id,
+                  action: "UPDATE_NODE",
+                  payload: { id: node.id, data: node.data },
+                });
+              }
+            });
+          }, 50);
+          
+          return updatedNodes;
+        });
+        
         // Eliminar edge localmente
         setEdges((eds: Edge[]) => eds.filter((e: Edge) => e.id !== edge.id));
 
@@ -1054,7 +1233,7 @@ export default function DiagramEditor() {
         });
       }
     },
-    [userRole, isGuest, project, setEdges, socket]
+    [userRole, isGuest, project, nodes, setNodes, setEdges, socket]
   );
 
   // 🧠 AI Integration - Apply actions received from AI
@@ -1116,6 +1295,7 @@ export default function DiagramEditor() {
                     relationType: f.relationType,
                     onDelete: f.onDelete,
                     onUpdate: f.onUpdate,
+                    isMethod: f.isMethod || false, // 🆕 Soporte para métodos
                   })),
                 },
               };
@@ -1205,11 +1385,24 @@ export default function DiagramEditor() {
 
               // Determinar tipo de relación: priorizar relationType (UML 2.5) sobre cardinality
               let relationType = "1-N"; // Default
+              let multiplicity: "1-1" | "1-N" | "N-N" | undefined = action.multiplicity;
               
               // Si hay relationType (INHERITANCE, COMPOSITION, etc.), usarlo directamente
               if (action.relationType) {
                 relationType = action.relationType;
                 console.log(`🎯 [AI] Using relationType from action: ${relationType}`);
+                
+                // ⚠️ VALIDACIÓN UML 2.5: AGGREGATION y COMPOSITION no permiten N-N
+                if ((relationType === "AGGREGATION" || relationType === "COMPOSITION") && multiplicity === "N-N") {
+                  console.warn(`⚠️ [AI] ${relationType} N-N no es válido en UML 2.5, convirtiendo a ASSOCIATION N-N`);
+                  relationType = "ASSOCIATION";
+                }
+                
+                // Si es ASSOCIATION, AGGREGATION o COMPOSITION y no tiene multiplicity, usar 1-N por defecto
+                if ((relationType === "ASSOCIATION" || relationType === "AGGREGATION" || relationType === "COMPOSITION") && !multiplicity) {
+                  multiplicity = "1-N";
+                  console.log(`🎯 [AI] Setting default multiplicity for ${relationType}: 1-N`);
+                }
               }
               // Si no hay relationType pero hay cardinality, mapear cardinalidades clásicas
               else if (action.cardinality) {
@@ -1276,8 +1469,8 @@ export default function DiagramEditor() {
                 console.log(`✅ [AI] Edge details:`, newEdge);
                 break; // Importante: salir del switch para no caer en otros casos
               }
-              // 🔹 Caso 2: RELACIÓN N-N (tabla intermedia)
-              else if (relationType === "N-N") {
+              // 🔹 Caso 2: RELACIÓN N-N (tabla intermedia) - Aplica para N-N y ASSOCIATION N-N
+              else if (relationType === "N-N" || (relationType === "ASSOCIATION" && multiplicity === "N-N")) {
                 const sourcePK = sourceNode.data.fields.find((f: any) => f.isPrimary);
                 const targetPK = targetNode.data.fields.find((f: any) => f.isPrimary);
                 const sourcePKName = sourcePK?.name || "id";
@@ -1285,6 +1478,8 @@ export default function DiagramEditor() {
 
                 const joinTableId = `join-${Date.now()}`;
                 const joinTableName = action.through || `${action.fromTable}_${action.toTable}`;
+                const finalRelationType = relationType === "ASSOCIATION" ? "ASSOCIATION" : "N-N";
+                
                 const joinTableNode: Node = {
                   id: joinTableId,
                   type: "table",
@@ -1295,6 +1490,7 @@ export default function DiagramEditor() {
                   data: {
                     name: joinTableName,
                     label: joinTableName,
+                    isJunctionTable: true,
                     fields: [
                       {
                         id: Date.now() + 1,
@@ -1304,6 +1500,7 @@ export default function DiagramEditor() {
                         nullable: false,
                         references: action.fromTable,
                         referencesField: sourcePKName,
+                        relationType: finalRelationType
                       },
                       {
                         id: Date.now() + 2,
@@ -1313,16 +1510,17 @@ export default function DiagramEditor() {
                         nullable: false,
                         references: action.toTable,
                         referencesField: targetPKName,
+                        relationType: finalRelationType
                       },
                     ],
                   },
                 };
 
                 // Crear edges
-                const edgeStyle1 = getEdgeStyle("1-N");
-                const edgeStyle2 = getEdgeStyle("1-N");
+                const edgeStyle1 = getEdgeStyle(relationType === "ASSOCIATION" ? "ASSOCIATION" : "1-N");
+                const edgeStyle2 = getEdgeStyle(relationType === "ASSOCIATION" ? "ASSOCIATION" : "1-N");
                 
-                // ⚠️ UML 2.5: En N-N las multiplicidades hacia tabla intermedia se sobreentienden
+                // ⚠️ UML 2.5: En N-N las multiplicidades hacia tabla intermedia se muestran
 
                 const edge1: Edge = {
                   id: `edge-${Date.now()}-1`,
@@ -1335,13 +1533,15 @@ export default function DiagramEditor() {
                     strokeWidth: edgeStyle1.strokeWidth,
                     strokeDasharray: edgeStyle1.strokeDasharray,
                   },
-                  markerEnd: { type: "arrowclosed", color: edgeStyle1.stroke },
+                  markerEnd: relationType === "ASSOCIATION" 
+                    ? undefined  // ASOCIACIÓN no tiene flecha
+                    : { type: "arrowclosed", color: edgeStyle1.stroke },
                   data: {
                     sourceField: sourcePKName,
                     targetField: `${action.fromTable}_${sourcePKName}`,
-                    relationType: "1-N",
-                    sourceMultiplicity: "",  // Vacío: no se muestra
-                    targetMultiplicity: ""   // Vacío: no se muestra
+                    relationType: finalRelationType,
+                    sourceMultiplicity: relationType === "ASSOCIATION" ? "*" : "",
+                    targetMultiplicity: relationType === "ASSOCIATION" ? "*" : ""
                   },
                 };
 
@@ -1356,13 +1556,15 @@ export default function DiagramEditor() {
                     strokeWidth: edgeStyle2.strokeWidth,
                     strokeDasharray: edgeStyle2.strokeDasharray,
                   },
-                  markerEnd: { type: "arrowclosed", color: edgeStyle2.stroke },
+                  markerEnd: relationType === "ASSOCIATION"
+                    ? undefined  // ASOCIACIÓN no tiene flecha
+                    : { type: "arrowclosed", color: edgeStyle2.stroke },
                   data: {
                     sourceField: targetPKName,
                     targetField: `${action.toTable}_${targetPKName}`,
-                    relationType: "1-N",
-                    sourceMultiplicity: "",  // Vacío: no se muestra
-                    targetMultiplicity: ""   // Vacío: no se muestra
+                    relationType: finalRelationType,
+                    sourceMultiplicity: relationType === "ASSOCIATION" ? "*" : "",
+                    targetMultiplicity: relationType === "ASSOCIATION" ? "*" : ""
                   },
                 };
 
@@ -1432,8 +1634,8 @@ export default function DiagramEditor() {
                   // Crear edge
                   const edgeStyle = getEdgeStyle(relationType);
                   
-                  // 🆕 UML 2.5: Obtener multiplicidades
-                  const multiplicities = getMultiplicitiesFromRelationType(relationType);
+                  // 🆕 UML 2.5: Obtener multiplicidades (usar multiplicity de la acción si existe)
+                  const multiplicities = getMultiplicitiesFromRelationType(relationType, multiplicity);
                   
                   const newEdge: Edge = {
                     id: `edge-${Date.now()}`,
@@ -1688,6 +1890,130 @@ export default function DiagramEditor() {
                     payload: modifiedEdge,
                   });
                 }
+              }
+              break;
+            }
+
+            case "AddMethod": {
+              const targetNode = updatedNodes.find(
+                (n) => 
+                  n.data.name?.toLowerCase() === action.tableName?.toLowerCase() || 
+                  n.data.label?.toLowerCase() === action.tableName?.toLowerCase()
+              );
+
+              if (targetNode && action.methodName) {
+                const newMethod = {
+                  id: Date.now() + Math.random(),
+                  name: action.methodName,
+                  isMethod: true,
+                };
+
+                const updatedFields = [...targetNode.data.fields, newMethod];
+
+                // Actualizar referencia local
+                updatedNodes = updatedNodes.map((n: Node) =>
+                  n.id === targetNode.id
+                    ? { ...n, data: { ...n.data, fields: updatedFields } }
+                    : n
+                );
+
+                handleNodeUpdate(targetNode.id, { fields: updatedFields });
+              }
+              break;
+            }
+
+            case "RenameMethod": {
+              const targetNode = updatedNodes.find(
+                (n) => 
+                  n.data.name?.toLowerCase() === action.tableName?.toLowerCase() || 
+                  n.data.label?.toLowerCase() === action.tableName?.toLowerCase()
+              );
+
+              if (targetNode && action.oldMethodName && action.newMethodName) {
+                const updatedFields = targetNode.data.fields.map((f: any) =>
+                  f.isMethod && f.name === action.oldMethodName
+                    ? { ...f, name: action.newMethodName }
+                    : f
+                );
+
+                // Actualizar referencia local
+                updatedNodes = updatedNodes.map((n: Node) =>
+                  n.id === targetNode.id
+                    ? { ...n, data: { ...n.data, fields: updatedFields } }
+                    : n
+                );
+
+                handleNodeUpdate(targetNode.id, { fields: updatedFields });
+              }
+              break;
+            }
+
+            case "DeleteMethod": {
+              const targetNode = updatedNodes.find(
+                (n) => 
+                  n.data.name?.toLowerCase() === action.tableName?.toLowerCase() || 
+                  n.data.label?.toLowerCase() === action.tableName?.toLowerCase()
+              );
+
+              if (targetNode && action.methodNames && Array.isArray(action.methodNames)) {
+                const methodsToDelete = new Set(action.methodNames);
+                const updatedFields = targetNode.data.fields.filter(
+                  (f: any) => !(f.isMethod && methodsToDelete.has(f.name))
+                );
+
+                // Actualizar referencia local
+                updatedNodes = updatedNodes.map((n: Node) =>
+                  n.id === targetNode.id
+                    ? { ...n, data: { ...n.data, fields: updatedFields } }
+                    : n
+                );
+
+                handleNodeUpdate(targetNode.id, { fields: updatedFields });
+              }
+              break;
+            }
+
+            case "ChangeView": {
+              if (action.viewMode === "SQL" || action.viewMode === "UML") {
+                setViewMode(action.viewMode);
+                console.log(`✅ [AI] Vista cambiada a: ${action.viewMode}`);
+              }
+              break;
+            }
+
+            case "ExportSQL": {
+              const sql = generateSQL(updatedNodes, updatedEdges);
+              downloadSQL(sql, `${project.name}_${Date.now()}.sql`);
+              alert("✅ SQL exportado correctamente!");
+              break;
+            }
+
+            case "ExportSpringBoot": {
+              try {
+                const zipBuffer = await generateSpringBootProject(
+                  { nodes: updatedNodes, edges: updatedEdges },
+                  project.name
+                );
+                downloadSpringBootProject(zipBuffer, project.name);
+                alert("✅ Proyecto Spring Boot generado correctamente!");
+              } catch (error) {
+                console.error("Error generando Spring Boot:", error);
+                alert("❌ Error al generar proyecto Spring Boot");
+              }
+              break;
+            }
+
+            case "ExportFlutter": {
+              try {
+                const zipBuffer = await generateFlutterProject(
+                  { nodes: updatedNodes, edges: updatedEdges },
+                  project.name
+                );
+                downloadFlutterProject(zipBuffer, project.name);
+                alert("✅ Proyecto Flutter generado correctamente!");
+              } catch (error) {
+                console.error("Error generando Flutter:", error);
+                alert("❌ Error al generar proyecto Flutter");
               }
               break;
             }
@@ -2094,8 +2420,8 @@ export default function DiagramEditor() {
               setSelectedNode(null);
               setSelectedEdge(null);
             }}
-            panOnDrag={!isViewer}
-            zoomOnScroll={!isViewer}
+            panOnDrag={true}
+            zoomOnScroll={true}
             nodesDraggable={!isViewer}
             nodesConnectable={!isViewer}
             elementsSelectable={!isViewer}
