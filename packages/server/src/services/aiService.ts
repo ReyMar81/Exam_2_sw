@@ -1929,6 +1929,36 @@ export function validateActions(actions: AIAction[]): {
         // No requiere validación adicional
         break;
 
+      case "AddMethod":
+        if (!action.tableName || action.tableName.trim() === "") {
+          errors.push(`Action ${index}: AddMethod missing tableName`);
+        }
+        if (!action.methodName || action.methodName.trim() === "") {
+          errors.push(`Action ${index}: AddMethod missing methodName`);
+        }
+        break;
+
+      case "RenameMethod":
+        if (!action.tableName || action.tableName.trim() === "") {
+          errors.push(`Action ${index}: RenameMethod missing tableName`);
+        }
+        if (!action.oldMethodName || action.oldMethodName.trim() === "") {
+          errors.push(`Action ${index}: RenameMethod missing oldMethodName`);
+        }
+        if (!action.newMethodName || action.newMethodName.trim() === "") {
+          errors.push(`Action ${index}: RenameMethod missing newMethodName`);
+        }
+        break;
+
+      case "DeleteMethod":
+        if (!action.tableName || action.tableName.trim() === "") {
+          errors.push(`Action ${index}: DeleteMethod missing tableName`);
+        }
+        if (!action.methodNames || action.methodNames.length === 0) {
+          errors.push(`Action ${index}: DeleteMethod missing methodNames`);
+        }
+        break;
+
       default:
         errors.push(`Action ${index}: Unknown action type`);
     }
